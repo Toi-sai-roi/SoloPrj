@@ -425,3 +425,118 @@ h1, h2, h3, button, input { font-family: var(--font-tech); letter-spacing: 1px; 
 .msg-status.sent { color: var(--text-muted); }
 .msg-status.delivered { color: var(--neon-cyan); }
 .msg-status.read { color: var(--neon-green); text-shadow: 0 0 4px var(--neon-green); }
+
+/* Message Reactions */
+.reactions-container {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.reaction-badge {
+  background: rgba(8, 8, 12, 0.8);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-body);
+}
+
+.reaction-badge:hover {
+  border-color: var(--neon-cyan);
+  background: rgba(0, 240, 255, 0.1);
+  transform: scale(1.05);
+}
+
+.reaction-badge .reaction-emoji {
+  font-size: 12px;
+}
+
+.reaction-badge .reaction-count {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.reaction-picker {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  background: var(--bg-card);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--neon-cyan);
+  border-radius: 8px;
+  padding: 8px;
+  display: flex;
+  gap: 8px;
+  z-index: 100;
+  margin-bottom: 8px;
+  box-shadow: 0 0 20px rgba(0, 240, 255, 0.3);
+}
+
+.reaction-option {
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px 8px;
+  transition: all 0.2s ease;
+  border-radius: 4px;
+}
+
+.reaction-option:hover {
+  background: rgba(0, 240, 255, 0.2);
+  transform: scale(1.2);
+}
+
+.msg-bubble {
+  position: relative;
+}
+
+.msg-bubble:hover .reaction-trigger {
+  opacity: 1;
+}
+
+.reaction-trigger {
+  position: absolute;
+  bottom: -10px;
+  right: -10px;
+  background: var(--bg-card);
+  border: 1px solid var(--neon-pink);
+  border-radius: 20px;
+  padding: 2px 6px;
+  font-size: 10px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  font-family: var(--font-tech);
+  color: var(--neon-pink);
+}
+
+.reaction-trigger:hover {
+  background: var(--neon-pink);
+  color: #000;
+  box-shadow: 0 0 10px var(--neon-pink);
+}
+
+.reaction-list-tooltip {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-card);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--neon-cyan);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 11px;
+  white-space: nowrap;
+  z-index: 100;
+  margin-bottom: 8px;
+  font-family: var(--font-tech);
+  color: var(--neon-cyan);
+  pointer-events: none;
+}

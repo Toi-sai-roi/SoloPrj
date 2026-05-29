@@ -1,8 +1,9 @@
 // ==========================================
-// chat.js — WebSocket + Chat Room logic
+// chat.js — Version 3 với Message Reactions
 // ==========================================
 
 let typingTimeout = null;
+let currentReactionMessageId = null;
 
 function initWebSocket() {
   if (AppState.ws) AppState.ws.close();
@@ -61,6 +62,11 @@ function initWebSocket() {
           if (data.reader === AppState.activeChatPartner) {
             updateAllMessagesStatus('read');
           }
+          break;
+        }
+
+        case 'reaction_update': {
+          updateMessageReaction(data.messageId, data.username, data.emoji);
           break;
         }
 
@@ -173,6 +179,93 @@ function updateAllMessagesStatus(status) {
       el.className = 'msg-status read';
     }
   });
+}
+
+// --- Reaction Functions ---
+
+function showReactionPicker(messageId, event) {
+  event.stopPropagation();
+  currentReactionMessageId = messageId;
+  
+  // Xóa picker cũ nếu có
+  const oldPicker = document.querySelector('.reaction-picker');
+  if (oldPicker) oldPicker.remove();
+  
+  const picker = document.createElement('div');
+  picker.className = 'reaction-picker';
+  picker.innerHTML = `
+    <div class="reaction-option" data-emoji="👍">👍</div>
+    <div class="reaction-option" data-emoji="❤️">❤️</div>
+    <div class="reaction-option" data-emoji="😂">😂</div>
+    <div class="reaction-option" data-emoji="😮">😮</div>
+    <div class="reaction-option" data-emoji="😢">😢</div>
+    <div class="reaction-option" data-emoji="😡">😡</div>
+  `;
+  
+  const rect = event.target.getBoundingClientRect();
+  picker.style.position = 'fixed';
+  picker.style.bottom = (window.innerHeight - rect.top + 10) + 'px';
+  picker.style.left = (rect.left + rect.width / 2 - 100) + 'px';
+  
+  document.body.appendChild(picker);
+  
+  picker.querySelectorAll('.reaction-option').forEach(opt => {
+    opt.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const emoji = opt.dataset.emoji;
+      addReaction(messageId, emoji);
+      picker.remove();
+    });
+  });
+  
+  setTimeout(() => {
+    document.addEventListener('click', function removePicker(e) {
+      if (!picker.contains(e.target)) {
+        picker.remove();
+        document.removeEventListener('click', removePicker);
+      }
+    });
+  }, 0);
+}
+
+function addReaction(messageId, emoji) {
+  if (AppState.ws && AppState.ws.readyState === WebSocket.OPEN) {
+    AppState.ws.send(JSON.stringify({
+      type: 'add_reaction',
+      messageId: messageId,
+      emoji: emoji
+    }));
+  }
+}
+
+function updateMessageReaction(messageId, username, emoji) {
+  const messageDiv = document.querySelector(`.msg-wrapper[data-message-id="${messageId}"]`);
+  if (!messageDiv) return;
+  
+  let reactionsContainer = messageDiv.querySelector('.reactions-container');
+  if (!reactionsContainer) {
+    reactionsContainer = document.createElement('div');
+    reactionsContainer.className = 'reactions-container';
+    messageDiv.querySelector('.msg-bubble').appendChild(reactionsContainer);
+  }
+  
+  // Cập nhật reaction
+  let reactionBadge = reactionsContainer.querySelector(`.reaction-badge[data-emoji="${emoji}"]`);
+  if (reactionBadge) {
+    const count = parseInt(reactionBadge.dataset.count || 1) + 1;
+    reactionBadge.dataset.count = count;
+    reactionBadge.querySelector('.reaction-count').textContent = count;
+  } else {
+    const badge = document.createElement('div');
+    badge.className = 'reaction-badge';
+    badge.dataset.emoji = emoji;
+    badge.dataset.count = 1;
+    badge.innerHTML = `
+      <span class="reaction-emoji">${emoji}</span>
+      <span class="reaction-count">1</span>
+    `;
+    reactionsContainer.appendChild(badge);
+  }
 }
 
 // --- Chat Room Functions ---
@@ -322,6 +415,7 @@ function appendChatMessage(msg) {
   const isSelf = msg.sender === AppState.currentUser || msg.self;
   const wrapper = document.createElement('div');
   wrapper.className = `msg-wrapper ${isSelf ? 'self' : 'other'}`;
+  wrapper.setAttribute('data-message-id', msg.id);
 
   let bubbleContent = '';
   if (msg.text && msg.text.startsWith('data:image/')) {
@@ -344,9 +438,33 @@ function appendChatMessage(msg) {
     }
   }
 
+  // Reactions
+  let reactionsHtml = '';
+  if (msg.reactions && Object.keys(msg.reactions).length > 0) {
+    const reactionMap = typeof msg.reactions === 'string' ? JSON.parse(msg.reactions) : msg.reactions;
+    reactionsHtml = '<div class="reactions-container">';
+    const emojiCounts = {};
+    Object.values(reactionMap).forEach(emoji => {
+      emojiCounts[emoji] = (emojiCounts[emoji] || 0) + 1;
+    });
+    for (const [emoji, count] of Object.entries(emojiCounts)) {
+      reactionsHtml += `
+        <div class="reaction-badge" data-emoji="${emoji}">
+          <span class="reaction-emoji">${emoji}</span>
+          <span class="reaction-count">${count}</span>
+        </div>
+      `;
+    }
+    reactionsHtml += '</div>';
+  }
+
   wrapper.innerHTML = `
     <div class="msg-sender">${msg.sender}</div>
-    <div class="msg-bubble">${bubbleContent}${statusIcon}</div>
+    <div class="msg-bubble">
+      ${bubbleContent}${statusIcon}
+      ${reactionsHtml}
+      <div class="reaction-trigger" onclick="showReactionPicker(${msg.id}, event)">➕</div>
+    </div>
     <div class="msg-time">${formatTime(msg.timestamp)}</div>
   `;
   messagesArea.appendChild(wrapper);

@@ -37,6 +37,17 @@ db.exec(`
     FOREIGN KEY (sender)   REFERENCES users(username),
     FOREIGN KEY (receiver) REFERENCES users(username)
   );
+
+  CREATE TABLE IF NOT EXISTS reactions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id INTEGER NOT NULL,
+    username   TEXT NOT NULL,
+    emoji      TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+    FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE,
+    UNIQUE(message_id, username)
+  );
 `);
 
 console.log('✅ SQLite database khởi tạo thành công:', DB_PATH);
@@ -304,10 +315,8 @@ wss.on('connection', (wsConn, request, username) => {
         const { with: withUser } = data;
         if (!withUser) return;
 
-        // Mark messages as read when opening chat
         markMessagesRead(withUser, username);
 
-        // Broadcast read status to sender
         if (onlineUsers.has(withUser)) {
           const readReceipt = { type: 'read_receipt', reader: username, with: withUser };
           onlineUsers.get(withUser).forEach(c => {
@@ -316,11 +325,13 @@ wss.on('connection', (wsConn, request, username) => {
         }
 
         const history = db.prepare(`
-        SELECT id, sender, receiver, text, timestamp, delivered, read_at 
-        FROM messages 
-        WHERE (sender = ? AND receiver = ?) OR (sender = ? AND receiver = ?)
-        ORDER BY timestamp ASC
-      `).all(username, withUser, withUser, username);
+          SELECT 
+            m.id, m.sender, m.receiver, m.text, m.timestamp, m.delivered, m.read_at,
+            (SELECT json_group_object(username, emoji) FROM reactions WHERE message_id = m.id) as reactions
+          FROM messages m
+          WHERE (m.sender = ? AND m.receiver = ?) OR (m.sender = ? AND m.receiver = ?)
+          ORDER BY m.timestamp ASC
+        `).all(username, withUser, withUser, username);
 
         wsConn.send(JSON.stringify({ type: 'history', with: withUser, messages: history }));
         return;
@@ -378,6 +389,47 @@ wss.on('connection', (wsConn, request, username) => {
           onlineUsers.get(username).forEach(c => {
             if (c.readyState === ws.OPEN) c.send(JSON.stringify(deliveredReceipt));
           });
+        }
+        return;
+      }
+      // === ADD REACTION ===
+      if (data.type === 'add_reaction') {
+        const { messageId, emoji } = data;
+        if (!messageId || !emoji) return;
+
+        try {
+          // Upsert reaction (nếu đã có thì update emoji mới)
+          db.prepare(`
+      INSERT INTO reactions (message_id, username, emoji) 
+      VALUES (?, ?, ?)
+      ON CONFLICT(message_id, username) DO UPDATE SET emoji = excluded.emoji
+    `).run(messageId, username, emoji);
+
+          // Lấy message info để biết gửi reaction đến ai
+          const message = db.prepare('SELECT sender, receiver FROM messages WHERE id = ?').get(messageId);
+          if (message) {
+            const reactionMsg = {
+              type: 'reaction_update',
+              messageId: messageId,
+              username: username,
+              emoji: emoji
+            };
+            const payload = JSON.stringify(reactionMsg);
+
+            // Gửi đến cả sender và receiver
+            if (onlineUsers.has(message.sender)) {
+              onlineUsers.get(message.sender).forEach(c => {
+                if (c.readyState === ws.OPEN) c.send(payload);
+              });
+            }
+            if (onlineUsers.has(message.receiver)) {
+              onlineUsers.get(message.receiver).forEach(c => {
+                if (c.readyState === ws.OPEN) c.send(payload);
+              });
+            }
+          }
+        } catch (err) {
+          console.error('Reaction error:', err.message);
         }
         return;
       }
