@@ -1,17 +1,17 @@
-const http = require('http');
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
-const ws = require('ws');
-const jwt = require('jsonwebtoken');
+const http    = require('http');
+const fs      = require('fs');
+const path    = require('path');
+const crypto  = require('crypto');
+const ws      = require('ws');
+const jwt     = require('jsonwebtoken');
 const { DatabaseSync } = require('node:sqlite');
 
 // ==========================================
 // CONFIG
 // ==========================================
-const PORT = process.env.PORT || 3000;
+const PORT       = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'cyberpunk-neon-glow-secret-2026';
-const DB_PATH = path.join(__dirname, 'chat.db');
+const DB_PATH    = path.join(__dirname, 'chat.db');
 
 // ==========================================
 // DATABASE
@@ -50,25 +50,17 @@ db.exec(`
   );
 `);
 
-console.log('✅ SQLite database khởi tạo thành công:', DB_PATH);
+console.log('✅ SQLite database:', DB_PATH);
 
 // ==========================================
 // DATABASE HELPER FUNCTIONS (thêm vào đây)
 // ==========================================
 function markMessagesDelivered(sender, receiver) {
-  db.prepare(`
-    UPDATE messages 
-    SET delivered = 1 
-    WHERE sender = ? AND receiver = ? AND delivered = 0
-  `).run(sender, receiver);
+  db.prepare(`UPDATE messages SET delivered = 1 WHERE sender = ? AND receiver = ? AND delivered = 0`).run(sender, receiver);
 }
 
 function markMessagesRead(sender, receiver) {
-  db.prepare(`
-    UPDATE messages 
-    SET read_at = CURRENT_TIMESTAMP 
-    WHERE sender = ? AND receiver = ? AND read_at IS NULL
-  `).run(sender, receiver);
+  db.prepare(`UPDATE messages SET read_at = CURRENT_TIMESTAMP WHERE sender = ? AND receiver = ? AND read_at IS NULL`).run(sender, receiver);
 }
 
 // ==========================================
@@ -94,7 +86,7 @@ function getPostBody(req) {
     req.on('data', chunk => { body += chunk.toString(); });
     req.on('end', () => {
       try { resolve(body ? JSON.parse(body) : {}); }
-      catch { reject(new Error('Dữ liệu JSON không hợp lệ')); }
+      catch { reject(new Error('Invalid JSON')); }
     });
     req.on('error', reject);
   });
@@ -118,12 +110,12 @@ function authenticateToken(req) {
 // ==========================================
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
-  '.css': 'text/css',
-  '.js': 'application/javascript',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
+  '.css':  'text/css',
+  '.js':   'application/javascript',
+  '.png':  'image/png',
+  '.jpg':  'image/jpeg',
+  '.svg':  'image/svg+xml',
+  '.ico':  'image/x-icon',
 };
 
 function serveStatic(req, res) {
@@ -163,26 +155,17 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/register' && req.method === 'POST') {
     try {
       const { username, password } = await getPostBody(req);
-      if (!username || !password)
-        return sendJSON(res, 400, { error: 'Username và password không được để trống' });
-
+      if (!username || !password) return sendJSON(res, 400, { error: 'Username và password không được để trống' });
       const clean = username.trim().toLowerCase();
-      if (clean.length < 3 || clean.length > 20)
-        return sendJSON(res, 400, { error: 'Username phải từ 3 đến 20 ký tự' });
-
-      if (db.prepare('SELECT 1 FROM users WHERE username = ?').get(clean))
-        return sendJSON(res, 400, { error: 'Tên đăng nhập đã được sử dụng' });
-
+      if (clean.length < 3 || clean.length > 20) return sendJSON(res, 400, { error: 'Username phải từ 3 đến 20 ký tự' });
+      if (db.prepare('SELECT 1 FROM users WHERE username = ?').get(clean)) return sendJSON(res, 400, { error: 'Tên đăng nhập đã được sử dụng' });
       const salt = generateSalt();
       const hash = hashPassword(password, salt);
       db.prepare('INSERT INTO users (username, password_hash, salt) VALUES (?, ?, ?)').run(clean, hash, salt);
-
       const token = jwt.sign({ username: clean }, JWT_SECRET, { expiresIn: '7d' });
       return sendJSON(res, 201, { success: true, token, username: clean });
-
     } catch (err) {
-      console.error(err);
-      return sendJSON(res, 500, { error: 'Lỗi máy chủ nội bộ' });
+      return sendJSON(res, 500, { error: 'Lỗi máy chủ' });
     }
   }
 
@@ -190,20 +173,14 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/login' && req.method === 'POST') {
     try {
       const { username, password } = await getPostBody(req);
-      if (!username || !password)
-        return sendJSON(res, 400, { error: 'Username và password không được để trống' });
-
+      if (!username || !password) return sendJSON(res, 400, { error: 'Username và password không được để trống' });
       const clean = username.trim().toLowerCase();
       const user = db.prepare('SELECT * FROM users WHERE username = ?').get(clean);
-      if (!user || hashPassword(password, user.salt) !== user.password_hash)
-        return sendJSON(res, 400, { error: 'Tài khoản hoặc mật khẩu không chính xác' });
-
+      if (!user || hashPassword(password, user.salt) !== user.password_hash) return sendJSON(res, 400, { error: 'Tài khoản hoặc mật khẩu không chính xác' });
       const token = jwt.sign({ username: clean }, JWT_SECRET, { expiresIn: '7d' });
       return sendJSON(res, 200, { success: true, token, username: clean });
-
     } catch (err) {
-      console.error(err);
-      return sendJSON(res, 500, { error: 'Lỗi máy chủ nội bộ' });
+      return sendJSON(res, 500, { error: 'Lỗi máy chủ' });
     }
   }
 
@@ -211,13 +188,9 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/users' && req.method === 'GET') {
     const payload = authenticateToken(req);
     if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
-
     try {
       const allUsers = db.prepare('SELECT username FROM users ORDER BY username ASC').all();
-      const usersList = allUsers.map(u => ({
-        username: u.username,
-        online: onlineUsers.has(u.username)
-      }));
+      const usersList = allUsers.map(u => ({ username: u.username, online: onlineUsers.has(u.username) }));
       return sendJSON(res, 200, usersList);
     } catch (err) {
       return sendJSON(res, 500, { error: 'Không thể lấy danh sách user' });
@@ -226,7 +199,6 @@ const server = http.createServer(async (req, res) => {
 
   // Serve static files (HTML, CSS, JS, assets)
   if (req.method === 'GET') return serveStatic(req, res);
-
   sendJSON(res, 404, { error: 'Không tìm thấy' });
 });
 
@@ -240,13 +212,11 @@ server.on('upgrade', (request, socket, head) => {
     const url = new URL(request.url, `http://${request.headers.host}`);
     const token = url.searchParams.get('token');
     if (!token) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return; }
-
     const decoded = jwt.verify(token, JWT_SECRET);
     wss.handleUpgrade(request, socket, head, (wsConn) => {
       wss.emit('connection', wsConn, request, decoded.username);
     });
   } catch (err) {
-    console.log('WS Auth Failed:', err.message);
     socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
     socket.destroy();
   }
@@ -279,9 +249,9 @@ wss.on('connection', (wsConn, request, username) => {
 
     // Gửi read receipts cho tất cả tin nhắn chưa đọc
     const unreadMessages = db.prepare(`
-    SELECT DISTINCT sender FROM messages 
-    WHERE receiver = ? AND read_at IS NULL
-  `).all(username);
+      SELECT DISTINCT sender FROM messages 
+      WHERE receiver = ? AND read_at IS NULL
+    `).all(username);
 
     unreadMessages.forEach(msg => {
       if (onlineUsers.has(msg.sender)) {
@@ -314,109 +284,57 @@ wss.on('connection', (wsConn, request, username) => {
       if (data.type === 'get_history') {
         const { with: withUser } = data;
         if (!withUser) return;
-
         markMessagesRead(withUser, username);
-
         if (onlineUsers.has(withUser)) {
           const readReceipt = { type: 'read_receipt', reader: username, with: withUser };
           onlineUsers.get(withUser).forEach(c => {
             if (c.readyState === ws.OPEN) c.send(JSON.stringify(readReceipt));
           });
         }
-
         const history = db.prepare(`
           SELECT 
             m.id, m.sender, m.receiver, m.text, m.timestamp, m.delivered, m.read_at,
-            (SELECT json_group_object(username, emoji) FROM reactions WHERE message_id = m.id) as reactions
+            json_group_object(r.username, r.emoji) as reactions,
+            json_group_object(r.username, strftime('%s', r.created_at)) as reaction_timestamps
           FROM messages m
+          LEFT JOIN reactions r ON m.id = r.message_id
           WHERE (m.sender = ? AND m.receiver = ?) OR (m.sender = ? AND m.receiver = ?)
+          GROUP BY m.id
           ORDER BY m.timestamp ASC
         `).all(username, withUser, withUser, username);
-
         wsConn.send(JSON.stringify({ type: 'history', with: withUser, messages: history }));
         return;
       }
 
-      // === SEND MESSAGE ===
-      if (data.type === 'send_message') {
-        const { to, text } = data;
-        if (!to || !text?.trim()) return;
-        const cleanText = text.trim();
-
-        const info = db.prepare(`
-        INSERT INTO messages (sender, receiver, text) VALUES (?, ?, ?)
-      `).run(username, to, cleanText);
-
-        const chatMsg = {
-          type: 'message',
-          id: Number(info.lastInsertRowid),
-          sender: username,
-          receiver: to,
-          text: cleanText,
-          timestamp: new Date().toISOString(),
-          delivered: 0,
-          read_at: null
-        };
-        const payload = JSON.stringify(chatMsg);
-
-        // Gửi đến người nhận (nếu online)
-        let isReceiverOnline = false;
-        if (onlineUsers.has(to)) {
-          isReceiverOnline = true;
-          onlineUsers.get(to).forEach(c => {
-            if (c.readyState === ws.OPEN) c.send(payload);
-          });
-          // Mark as delivered immediately if receiver is online
-          markMessagesDelivered(username, to);
-          chatMsg.delivered = 1;
-        }
-
-        // Đồng bộ tab khác của người gửi
-        if (onlineUsers.has(username)) {
-          onlineUsers.get(username).forEach(c => {
-            if (c !== wsConn && c.readyState === ws.OPEN) {
-              c.send(JSON.stringify({ ...chatMsg, self: true }));
-            }
-          });
-        }
-
-        // Phản hồi tab hiện tại
-        wsConn.send(JSON.stringify({ ...chatMsg, self: true }));
-
-        // Gửi delivered receipt nếu receiver online
-        if (isReceiverOnline && onlineUsers.has(username)) {
-          const deliveredReceipt = { type: 'delivered_receipt', messageId: chatMsg.id, to: username, from: to };
-          onlineUsers.get(username).forEach(c => {
-            if (c.readyState === ws.OPEN) c.send(JSON.stringify(deliveredReceipt));
-          });
-        }
-        return;
-      }
       // === ADD REACTION ===
       if (data.type === 'add_reaction') {
         const { messageId, emoji } = data;
         if (!messageId || !emoji) return;
-
         try {
-          // Upsert reaction (nếu đã có thì update emoji mới)
           db.prepare(`
-      INSERT INTO reactions (message_id, username, emoji) 
-      VALUES (?, ?, ?)
-      ON CONFLICT(message_id, username) DO UPDATE SET emoji = excluded.emoji
-    `).run(messageId, username, emoji);
-
-          // Lấy message info để biết gửi reaction đến ai
+            INSERT INTO reactions (message_id, username, emoji) 
+            VALUES (?, ?, ?)
+            ON CONFLICT(message_id, username) DO UPDATE SET emoji = excluded.emoji, created_at = CURRENT_TIMESTAMP
+          `).run(messageId, username, emoji);
+          
           const message = db.prepare('SELECT sender, receiver FROM messages WHERE id = ?').get(messageId);
           if (message) {
+            const allReactions = db.prepare(`
+              SELECT username, emoji, strftime('%s', created_at) as ts FROM reactions WHERE message_id = ?
+            `).all(messageId);
+            const reactionMap = {};
+            const reactionTimestamps = {};
+            for (const r of allReactions) {
+              reactionMap[r.username] = r.emoji;
+              reactionTimestamps[r.username] = parseInt(r.ts);
+            }
             const reactionMsg = {
               type: 'reaction_update',
               messageId: messageId,
-              username: username,
-              emoji: emoji
+              reactions: reactionMap,
+              reactionTimestamps: reactionTimestamps
             };
             const payload = JSON.stringify(reactionMsg);
-
-            // Gửi đến cả sender và receiver
             if (onlineUsers.has(message.sender)) {
               onlineUsers.get(message.sender).forEach(c => {
                 if (c.readyState === ws.OPEN) c.send(payload);
@@ -430,6 +348,58 @@ wss.on('connection', (wsConn, request, username) => {
           }
         } catch (err) {
           console.error('Reaction error:', err.message);
+        }
+        return;
+      }
+
+      // === SEND MESSAGE ===
+      if (data.type === 'send_message') {
+        const { to, text } = data;
+        if (!to || !text?.trim()) return;
+        const cleanText = text.trim();
+        const info = db.prepare(`INSERT INTO messages (sender, receiver, text) VALUES (?, ?, ?)`).run(username, to, cleanText);
+        const chatMsg = {
+          type: 'message',
+          id: Number(info.lastInsertRowid),
+          sender: username,
+          receiver: to,
+          text: cleanText,
+          timestamp: new Date().toISOString(),
+          delivered: 0,
+          read_at: null
+        };
+        const payload = JSON.stringify(chatMsg);
+        
+        // Gửi đến người nhận (nếu online)
+        let isReceiverOnline = false;
+        if (onlineUsers.has(to)) {
+          isReceiverOnline = true;
+          onlineUsers.get(to).forEach(c => {
+            if (c.readyState === ws.OPEN) c.send(payload);
+          });
+          // Mark as delivered immediately if receiver is online
+          markMessagesDelivered(username, to);
+          chatMsg.delivered = 1;
+        }
+        
+        // Đồng bộ tab khác của người gửi
+        if (onlineUsers.has(username)) {
+          onlineUsers.get(username).forEach(c => {
+            if (c !== wsConn && c.readyState === ws.OPEN) {
+              c.send(JSON.stringify({ ...chatMsg, self: true }));
+            }
+          });
+        }
+        
+        // Phản hồi tab hiện tại
+        wsConn.send(JSON.stringify({ ...chatMsg, self: true }));
+        
+        // Gửi delivered receipt nếu receiver online
+        if (isReceiverOnline && onlineUsers.has(username)) {
+          const deliveredReceipt = { type: 'delivered_receipt', messageId: chatMsg.id, to: username, from: to };
+          onlineUsers.get(username).forEach(c => {
+            if (c.readyState === ws.OPEN) c.send(JSON.stringify(deliveredReceipt));
+          });
         }
         return;
       }
