@@ -186,11 +186,11 @@ function updateAllMessagesStatus(status) {
 function showReactionPicker(messageId, event) {
   event.stopPropagation();
   currentReactionMessageId = messageId;
-  
+
   // Xóa picker cũ nếu có
   const oldPicker = document.querySelector('.reaction-picker');
   if (oldPicker) oldPicker.remove();
-  
+
   const picker = document.createElement('div');
   picker.className = 'reaction-picker';
   picker.innerHTML = `
@@ -200,15 +200,17 @@ function showReactionPicker(messageId, event) {
     <div class="reaction-option" data-emoji="😮">😮</div>
     <div class="reaction-option" data-emoji="😢">😢</div>
     <div class="reaction-option" data-emoji="😡">😡</div>
+    <div class="reaction-option" data-emoji="🎉">🎉</div>
+    <div class="reaction-option" data-emoji="🔥">🔥</div>
   `;
-  
+
+  // Đặt vị trí picker ngay trên nút reaction trigger
   const rect = event.target.getBoundingClientRect();
-  picker.style.position = 'fixed';
   picker.style.bottom = (window.innerHeight - rect.top + 10) + 'px';
-  picker.style.left = (rect.left + rect.width / 2 - 100) + 'px';
-  
+  picker.style.left = (rect.left + rect.width / 2 - 150) + 'px';
+
   document.body.appendChild(picker);
-  
+
   picker.querySelectorAll('.reaction-option').forEach(opt => {
     opt.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -217,14 +219,16 @@ function showReactionPicker(messageId, event) {
       picker.remove();
     });
   });
-  
+
+  // Click ra ngoài để đóng picker
   setTimeout(() => {
-    document.addEventListener('click', function removePicker(e) {
+    const closePicker = (e) => {
       if (!picker.contains(e.target)) {
         picker.remove();
-        document.removeEventListener('click', removePicker);
+        document.removeEventListener('click', closePicker);
       }
-    });
+    };
+    document.addEventListener('click', closePicker);
   }, 0);
 }
 
@@ -249,22 +253,32 @@ function updateMessageReaction(messageId, username, emoji) {
     messageDiv.querySelector('.msg-bubble').appendChild(reactionsContainer);
   }
   
-  // Cập nhật reaction
+  // Cập nhật hoặc thêm reaction badge
   let reactionBadge = reactionsContainer.querySelector(`.reaction-badge[data-emoji="${emoji}"]`);
   if (reactionBadge) {
-    const count = parseInt(reactionBadge.dataset.count || 1) + 1;
-    reactionBadge.dataset.count = count;
-    reactionBadge.querySelector('.reaction-count').textContent = count;
+    const countSpan = reactionBadge.querySelector('.reaction-count');
+    const currentCount = parseInt(countSpan.textContent);
+    countSpan.textContent = currentCount + 1;
   } else {
     const badge = document.createElement('div');
     badge.className = 'reaction-badge';
-    badge.dataset.emoji = emoji;
-    badge.dataset.count = 1;
+    badge.setAttribute('data-emoji', emoji);
     badge.innerHTML = `
       <span class="reaction-emoji">${emoji}</span>
       <span class="reaction-count">1</span>
     `;
+    badge.onclick = (e) => {
+      e.stopPropagation();
+      addReaction(messageId, emoji);
+    };
     reactionsContainer.appendChild(badge);
+  }
+  
+  // Nếu có reactions thì hiển thị container, nếu không thì ẩn đi
+  if (reactionsContainer.children.length === 0) {
+    reactionsContainer.style.display = 'none';
+  } else {
+    reactionsContainer.style.display = 'flex';
   }
 }
 
@@ -287,7 +301,7 @@ function openChatWith(username) {
   if (AppState.ws && AppState.ws.readyState === WebSocket.OPEN) {
     AppState.ws.send(JSON.stringify({ type: 'get_history', with: username }));
   }
-  
+
   hideTypingIndicator();
 }
 
@@ -333,7 +347,7 @@ function handleMediaSelect(event) {
   }
 
   const reader = new FileReader();
-  reader.onload = function(e) {
+  reader.onload = function (e) {
     AppState.selectedMedia = e.target.result;
     AppState.selectedMediaType = file.type;
 
@@ -375,25 +389,25 @@ function handleSendMessage(e) {
   e.preventDefault();
   const field = document.getElementById('chat-input-field');
   const text = field.value.trim();
-  
+
   if (!AppState.activeChatPartner) return;
   if (!text && !AppState.selectedMedia) return;
 
   if (AppState.ws && AppState.ws.readyState === WebSocket.OPEN) {
     if (AppState.selectedMedia) {
-      AppState.ws.send(JSON.stringify({ 
-        type: 'send_message', 
-        to: AppState.activeChatPartner, 
-        text: AppState.selectedMedia 
+      AppState.ws.send(JSON.stringify({
+        type: 'send_message',
+        to: AppState.activeChatPartner,
+        text: AppState.selectedMedia
       }));
       clearMediaSelection();
     }
 
     if (text) {
-      AppState.ws.send(JSON.stringify({ 
-        type: 'send_message', 
-        to: AppState.activeChatPartner, 
-        text: text 
+      AppState.ws.send(JSON.stringify({
+        type: 'send_message',
+        to: AppState.activeChatPartner,
+        text: text
       }));
       field.value = '';
       field.focus();
@@ -439,23 +453,36 @@ function appendChatMessage(msg) {
   }
 
   // Reactions
+  // Reactions - lấy danh sách reaction hiện có
   let reactionsHtml = '';
-  if (msg.reactions && Object.keys(msg.reactions).length > 0) {
-    const reactionMap = typeof msg.reactions === 'string' ? JSON.parse(msg.reactions) : msg.reactions;
-    reactionsHtml = '<div class="reactions-container">';
-    const emojiCounts = {};
-    Object.values(reactionMap).forEach(emoji => {
-      emojiCounts[emoji] = (emojiCounts[emoji] || 0) + 1;
-    });
-    for (const [emoji, count] of Object.entries(emojiCounts)) {
-      reactionsHtml += `
-        <div class="reaction-badge" data-emoji="${emoji}">
-          <span class="reaction-emoji">${emoji}</span>
-          <span class="reaction-count">${count}</span>
-        </div>
-      `;
+  let hasReactions = false;
+  if (msg.reactions) {
+    let reactionMap;
+    if (typeof msg.reactions === 'string') {
+      try {
+        reactionMap = JSON.parse(msg.reactions);
+      } catch (e) { reactionMap = {}; }
+    } else {
+      reactionMap = msg.reactions || {};
     }
-    reactionsHtml += '</div>';
+
+    if (Object.keys(reactionMap).length > 0) {
+      hasReactions = true;
+      const emojiCounts = {};
+      Object.values(reactionMap).forEach(emoji => {
+        emojiCounts[emoji] = (emojiCounts[emoji] || 0) + 1;
+      });
+      reactionsHtml = '<div class="reactions-container">';
+      for (const [emoji, count] of Object.entries(emojiCounts)) {
+        reactionsHtml += `
+          <div class="reaction-badge" data-emoji="${emoji}" onclick="event.stopPropagation(); addReaction(${msg.id}, '${emoji}')">
+            <span class="reaction-emoji">${emoji}</span>
+            <span class="reaction-count">${count}</span>
+          </div>
+        `;
+      }
+      reactionsHtml += '</div>';
+    }
   }
 
   wrapper.innerHTML = `
@@ -463,7 +490,7 @@ function appendChatMessage(msg) {
     <div class="msg-bubble">
       ${bubbleContent}${statusIcon}
       ${reactionsHtml}
-      <div class="reaction-trigger" onclick="showReactionPicker(${msg.id}, event)">➕</div>
+      <div class="reaction-trigger" onclick="event.stopPropagation(); showReactionPicker(${msg.id}, event)">😊</div>
     </div>
     <div class="msg-time">${formatTime(msg.timestamp)}</div>
   `;
@@ -512,7 +539,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (inputField) {
     inputField.addEventListener('input', () => {
       if (!AppState.activeChatPartner) return;
-      
+
       if (inputField.value.length > 0) {
         sendTypingStart();
         if (typingTimeout) clearTimeout(typingTimeout);
