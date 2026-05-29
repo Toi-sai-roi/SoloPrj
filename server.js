@@ -1,0 +1,324 @@
+const http    = require('http');
+const fs      = require('fs');
+const path    = require('path');
+const crypto  = require('crypto');
+const ws      = require('ws');
+const jwt     = require('jsonwebtoken');
+const { DatabaseSync } = require('node:sqlite'); 
+
+// ==========================================
+// CONFIG
+// ==========================================
+const PORT       = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET || 'cyberpunk-neon-glow-secret-2026';
+const DB_PATH    = path.join(__dirname, 'chat.db');
+
+// ==========================================
+// DATABASE
+// ==========================================
+const db = new DatabaseSync(DB_PATH);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    username      TEXT PRIMARY KEY,
+    password_hash TEXT NOT NULL,
+    salt          TEXT NOT NULL,
+    created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS messages (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    sender    TEXT NOT NULL,
+    receiver  TEXT NOT NULL,
+    text      TEXT NOT NULL,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (sender)   REFERENCES users(username),
+    FOREIGN KEY (receiver) REFERENCES users(username)
+  );
+`);
+
+console.log('✅ SQLite database khởi tạo thành công:', DB_PATH);
+
+// ==========================================
+// ONLINE USERS MAP
+// key: username, value: Set<WebSocket>
+// ==========================================
+const onlineUsers = new Map();
+
+// ==========================================
+// AUTH HELPERS
+// ==========================================
+function generateSalt()             { return crypto.randomBytes(16).toString('hex'); }
+function hashPassword(password, salt) {
+  return crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+}
+
+// ==========================================
+// HTTP HELPERS
+// ==========================================
+function getPostBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', () => {
+      try { resolve(body ? JSON.parse(body) : {}); }
+      catch { reject(new Error('Dữ liệu JSON không hợp lệ')); }
+    });
+    req.on('error', reject);
+  });
+}
+
+function sendJSON(res, status, data) {
+  res.writeHead(status, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(data));
+}
+
+function authenticateToken(req) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (!token) return null;
+  try { return jwt.verify(token, JWT_SECRET); }
+  catch { return null; }
+}
+
+// ==========================================
+// STATIC FILE SERVER
+// ==========================================
+const MIME_TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.css':  'text/css',
+  '.js':   'application/javascript',
+  '.png':  'image/png',
+  '.jpg':  'image/jpeg',
+  '.svg':  'image/svg+xml',
+  '.ico':  'image/x-icon',
+};
+
+function serveStatic(req, res) {
+  // Default sang index.html cho mọi route không phải file
+  let filePath = path.join(__dirname, 'public', req.url === '/' ? 'index.html' : req.url);
+  const ext    = path.extname(filePath);
+  const mime   = MIME_TYPES[ext] || 'text/plain';
+
+  fs.readFile(filePath, (err, content) => {
+    if (err) {
+      // Fallback về index.html nếu file không tồn tại (SPA routing)
+      fs.readFile(path.join(__dirname, 'public', 'index.html'), (err2, indexContent) => {
+        if (err2) { res.writeHead(500); res.end('Server error'); return; }
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(indexContent);
+      });
+    } else {
+      res.writeHead(200, { 'Content-Type': mime });
+      res.end(content);
+    }
+  });
+}
+
+// ==========================================
+// HTTP SERVER
+// ==========================================
+const server = http.createServer(async (req, res) => {
+  const url      = new URL(req.url, `http://${req.headers.host}`);
+  const pathname = url.pathname;
+
+  // CORS headers (optional, hữu ích khi dev local)
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
+  // --- API ROUTES ---
+
+  // POST /api/register
+  if (pathname === '/api/register' && req.method === 'POST') {
+    try {
+      const { username, password } = await getPostBody(req);
+      if (!username || !password)
+        return sendJSON(res, 400, { error: 'Username và password không được để trống' });
+
+      const clean = username.trim().toLowerCase();
+      if (clean.length < 3 || clean.length > 20)
+        return sendJSON(res, 400, { error: 'Username phải từ 3 đến 20 ký tự' });
+
+      if (db.prepare('SELECT 1 FROM users WHERE username = ?').get(clean))
+        return sendJSON(res, 400, { error: 'Tên đăng nhập đã được sử dụng' });
+
+      const salt = generateSalt();
+      const hash = hashPassword(password, salt);
+      db.prepare('INSERT INTO users (username, password_hash, salt) VALUES (?, ?, ?)').run(clean, hash, salt);
+
+      const token = jwt.sign({ username: clean }, JWT_SECRET, { expiresIn: '7d' });
+      return sendJSON(res, 201, { success: true, token, username: clean });
+
+    } catch (err) {
+      console.error(err);
+      return sendJSON(res, 500, { error: 'Lỗi máy chủ nội bộ' });
+    }
+  }
+
+  // POST /api/login
+  if (pathname === '/api/login' && req.method === 'POST') {
+    try {
+      const { username, password } = await getPostBody(req);
+      if (!username || !password)
+        return sendJSON(res, 400, { error: 'Username và password không được để trống' });
+
+      const clean = username.trim().toLowerCase();
+      const user  = db.prepare('SELECT * FROM users WHERE username = ?').get(clean);
+      if (!user || hashPassword(password, user.salt) !== user.password_hash)
+        return sendJSON(res, 400, { error: 'Tài khoản hoặc mật khẩu không chính xác' });
+
+      const token = jwt.sign({ username: clean }, JWT_SECRET, { expiresIn: '7d' });
+      return sendJSON(res, 200, { success: true, token, username: clean });
+
+    } catch (err) {
+      console.error(err);
+      return sendJSON(res, 500, { error: 'Lỗi máy chủ nội bộ' });
+    }
+  }
+
+  // GET /api/users
+  if (pathname === '/api/users' && req.method === 'GET') {
+    const payload = authenticateToken(req);
+    if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
+
+    try {
+      const allUsers = db.prepare('SELECT username FROM users ORDER BY username ASC').all();
+      const usersList = allUsers.map(u => ({
+        username: u.username,
+        online: onlineUsers.has(u.username)
+      }));
+      return sendJSON(res, 200, usersList);
+    } catch (err) {
+      return sendJSON(res, 500, { error: 'Không thể lấy danh sách user' });
+    }
+  }
+
+  // Serve static files (HTML, CSS, JS, assets)
+  if (req.method === 'GET') return serveStatic(req, res);
+
+  sendJSON(res, 404, { error: 'Không tìm thấy' });
+});
+
+// ==========================================
+// WEBSOCKET SERVER
+// ==========================================
+const wss = new ws.Server({ noServer: true });
+
+server.on('upgrade', (request, socket, head) => {
+  try {
+    const url   = new URL(request.url, `http://${request.headers.host}`);
+    const token = url.searchParams.get('token');
+    if (!token) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return; }
+
+    const decoded = jwt.verify(token, JWT_SECRET);
+    wss.handleUpgrade(request, socket, head, (wsConn) => {
+      wss.emit('connection', wsConn, request, decoded.username);
+    });
+  } catch (err) {
+    console.log('WS Auth Failed:', err.message);
+    socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+    socket.destroy();
+  }
+});
+
+// Broadcast helpers
+function broadcastStatusChange(username, online) {
+  const payload = JSON.stringify({ type: 'status_change', username, online });
+  for (const connections of onlineUsers.values())
+    connections.forEach(c => c.readyState === ws.OPEN && c.send(payload));
+}
+
+function broadcastSystemMessage(text) {
+  const payload = JSON.stringify({ type: 'system', text, timestamp: new Date().toISOString() });
+  for (const connections of onlineUsers.values())
+    connections.forEach(c => c.readyState === ws.OPEN && c.send(payload));
+}
+
+// Connection handler
+wss.on('connection', (wsConn, request, username) => {
+  console.log(`[WS] ${username} connected`);
+
+  if (!onlineUsers.has(username)) onlineUsers.set(username, new Set());
+  onlineUsers.get(username).add(wsConn);
+
+  if (onlineUsers.get(username).size === 1) {
+    broadcastStatusChange(username, true);
+    broadcastSystemMessage(`${username} đã đăng nhập vào mạng lưới.`);
+  }
+
+  wsConn.on('message', (messageStr) => {
+    try {
+      const data = JSON.parse(messageStr);
+
+      if (data.type === 'get_history') {
+        const { with: withUser } = data;
+        if (!withUser) return;
+        const history = db.prepare(`
+          SELECT sender, receiver, text, timestamp FROM messages
+          WHERE (sender = ? AND receiver = ?) OR (sender = ? AND receiver = ?)
+          ORDER BY timestamp ASC
+        `).all(username, withUser, withUser, username);
+        wsConn.send(JSON.stringify({ type: 'history', with: withUser, messages: history }));
+      }
+
+      if (data.type === 'send_message') {
+        const { to, text } = data;
+        if (!to || !text?.trim()) return;
+        const cleanText = text.trim();
+
+        const info = db.prepare('INSERT INTO messages (sender, receiver, text) VALUES (?, ?, ?)')
+          .run(username, to, cleanText);
+
+        const chatMsg = {
+          type: 'message',
+          id: Number(info.lastInsertRowid),
+          sender: username,
+          receiver: to,
+          text: cleanText,
+          timestamp: new Date().toISOString()
+        };
+        const payload = JSON.stringify(chatMsg);
+
+        // Gửi đến người nhận
+        if (onlineUsers.has(to))
+          onlineUsers.get(to).forEach(c => c.readyState === ws.OPEN && c.send(payload));
+
+        // Đồng bộ tab khác của người gửi
+        if (onlineUsers.has(username))
+          onlineUsers.get(username).forEach(c => {
+            if (c !== wsConn && c.readyState === ws.OPEN) c.send(payload);
+          });
+
+        // Phản hồi tab hiện tại (self: true)
+        wsConn.send(JSON.stringify({ ...chatMsg, self: true }));
+      }
+
+    } catch (err) {
+      console.error('WS message error:', err.message);
+    }
+  });
+
+  wsConn.on('close', () => {
+    console.log(`[WS] ${username} disconnected`);
+    const conns = onlineUsers.get(username);
+    if (conns) {
+      conns.delete(wsConn);
+      if (conns.size === 0) {
+        onlineUsers.delete(username);
+        broadcastStatusChange(username, false);
+        broadcastSystemMessage(`${username} đã ngắt kết nối.`);
+      }
+    }
+  });
+
+  wsConn.on('error', (err) => console.error(`[WS Error] ${username}:`, err.message));
+});
+
+// ==========================================
+// START
+// ==========================================
+server.listen(PORT, () => {
+  console.log(`====================================================`);
+  console.log(`🤖 CYBERPUNK CHAT SERVER RUNNING`);
+  console.log(`🔗 http://localhost:${PORT}`);
+  console.log(`====================================================`);
+});
