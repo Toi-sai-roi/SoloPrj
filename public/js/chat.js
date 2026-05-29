@@ -452,22 +452,19 @@ function appendChatMessage(msg) {
     }
   }
 
-  // Reactions
   // Reactions - lấy danh sách reaction hiện có
   let reactionsHtml = '';
-  let hasReactions = false;
   if (msg.reactions) {
     let reactionMap;
     if (typeof msg.reactions === 'string') {
       try {
         reactionMap = JSON.parse(msg.reactions);
-      } catch (e) { reactionMap = {}; }
+      } catch(e) { reactionMap = {}; }
     } else {
       reactionMap = msg.reactions || {};
     }
-
+    
     if (Object.keys(reactionMap).length > 0) {
-      hasReactions = true;
       const emojiCounts = {};
       Object.values(reactionMap).forEach(emoji => {
         emojiCounts[emoji] = (emojiCounts[emoji] || 0) + 1;

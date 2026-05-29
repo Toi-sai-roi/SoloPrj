@@ -282,6 +282,7 @@ h1, h2, h3, button, input { font-family: var(--font-tech); letter-spacing: 1px; 
   from { opacity: 0; transform: translateY(10px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+.msg-wrapper.other .reactions-container { left: 30px; justify-content: flex-start;}
 .msg-wrapper.self  { align-self: flex-end;  align-items: flex-end; }
 .msg-wrapper.other { align-self: flex-start; align-items: flex-start; }
 .msg-sender { font-family: var(--font-tech); font-size: 10px; margin-bottom: 4px; text-transform: uppercase; }
@@ -435,7 +436,6 @@ h1, h2, h3, button, input { font-family: var(--font-tech); letter-spacing: 1px; 
 .reaction-trigger {
   position: absolute;
   bottom: -12px;
-  right: -8px;
   background: var(--bg-card);
   border: 1px solid var(--neon-pink);
   border-radius: 20px;
@@ -449,6 +449,11 @@ h1, h2, h3, button, input { font-family: var(--font-tech); letter-spacing: 1px; 
   z-index: 10;
   backdrop-filter: blur(8px);
   line-height: 1;
+}
+
+/* Tin nhắn của đối phương (bên trái) → trigger ở bên trái */
+.msg-wrapper.other .reaction-trigger {
+  left: -8px;
 }
 
 .msg-bubble:hover .reaction-trigger {
@@ -466,8 +471,10 @@ h1, h2, h3, button, input { font-family: var(--font-tech); letter-spacing: 1px; 
   gap: 4px;
   position: absolute;
   bottom: -16px;
-  right: 30px;
   z-index: 9;
+  max-width: calc(100% - 40px);
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .reaction-badge {
@@ -484,6 +491,7 @@ h1, h2, h3, button, input { font-family: var(--font-tech); letter-spacing: 1px; 
   gap: 4px;
   font-family: var(--font-body);
   box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  white-space: nowrap;
 }
 
 .reaction-badge:hover {
@@ -502,7 +510,7 @@ h1, h2, h3, button, input { font-family: var(--font-tech); letter-spacing: 1px; 
   font-weight: 600;
 }
 
-/* Reaction Picker - Style Zalo */
+/* Reaction Picker */
 .reaction-picker {
   position: fixed;
   background: var(--bg-card);
