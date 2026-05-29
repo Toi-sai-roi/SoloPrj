@@ -2,6 +2,8 @@
 // chat.js — WebSocket + Chat Room logic
 // ==========================================
 
+let typingTimeout = null;
+
 function initWebSocket() {
   if (AppState.ws) AppState.ws.close();
 
@@ -21,7 +23,7 @@ function initWebSocket() {
             AppState.usersData[idx].online = data.online;
             renderUsersList();
           } else {
-            loadUsers(); // user mới đăng ký
+            loadUsers();
           }
           if (AppState.activeChatPartner === data.username) {
             updateChatPartnerStatus(data.online);
@@ -34,9 +36,37 @@ function initWebSocket() {
           break;
         }
 
+        case 'typing': {
+          if (data.sender === AppState.activeChatPartner) {
+            if (data.isTyping) {
+              showTypingIndicator();
+              if (window.typingHideTimeout) clearTimeout(window.typingHideTimeout);
+              window.typingHideTimeout = setTimeout(() => hideTypingIndicator(), 3000);
+            } else {
+              hideTypingIndicator();
+              if (window.typingHideTimeout) clearTimeout(window.typingHideTimeout);
+            }
+          }
+          break;
+        }
+
+        case 'delivered_receipt': {
+          if (data.to === AppState.currentUser) {
+            updateMessageStatus(data.messageId, 'delivered');
+          }
+          break;
+        }
+
+        case 'read_receipt': {
+          if (data.reader === AppState.activeChatPartner) {
+            updateAllMessagesStatus('read');
+          }
+          break;
+        }
+
         case 'message': {
           const isFromPartner = data.sender === AppState.activeChatPartner;
-          const isToPartner   = data.receiver === AppState.activeChatPartner;
+          const isToPartner = data.receiver === AppState.activeChatPartner;
           if (isFromPartner || isToPartner) {
             appendChatMessage(data);
           } else {
@@ -62,13 +92,90 @@ function initWebSocket() {
 
   AppState.ws.onclose = () => {
     console.log('[WS Disconnected]');
-    if (AppState.token) setTimeout(initWebSocket, 5000); // auto-reconnect
+    if (AppState.token) setTimeout(initWebSocket, 5000);
   };
 
   AppState.ws.onerror = (err) => console.error('[WS Error]', err);
 }
 
-// --- Chat Room ---
+// --- Typing Indicator Functions ---
+
+function sendTypingStart() {
+  if (!AppState.activeChatPartner) return;
+  if (AppState.ws && AppState.ws.readyState === WebSocket.OPEN) {
+    AppState.ws.send(JSON.stringify({
+      type: 'typing',
+      to: AppState.activeChatPartner,
+      isTyping: true
+    }));
+  }
+}
+
+function sendTypingStop() {
+  if (!AppState.activeChatPartner) return;
+  if (AppState.ws && AppState.ws.readyState === WebSocket.OPEN) {
+    AppState.ws.send(JSON.stringify({
+      type: 'typing',
+      to: AppState.activeChatPartner,
+      isTyping: false
+    }));
+  }
+}
+
+function showTypingIndicator() {
+  const statusText = document.getElementById('chat-partner-status-text');
+  if (!statusText) return;
+  if (!statusText.dataset.originalText) {
+    statusText.dataset.originalText = statusText.textContent;
+  }
+  statusText.innerHTML = 'ĐANG GÕ <span style="display: inline-flex; gap: 2px;">.<span>.</span><span>.</span></span>';
+  statusText.style.color = 'var(--neon-cyan)';
+  statusText.style.textShadow = '0 0 5px var(--neon-cyan)';
+}
+
+function hideTypingIndicator() {
+  const statusText = document.getElementById('chat-partner-status-text');
+  if (!statusText) return;
+  const originalText = statusText.dataset.originalText;
+  const dot = document.getElementById('chat-partner-status-dot');
+  const isOnline = dot && dot.classList.contains('online');
+  if (originalText) {
+    statusText.textContent = originalText;
+    statusText.style.color = isOnline ? 'var(--neon-green)' : 'var(--text-muted)';
+    statusText.style.textShadow = isOnline ? '0 0 5px rgba(57, 255, 20, 0.4)' : 'none';
+  }
+}
+
+// --- Read Receipt Functions ---
+
+function updateMessageStatus(messageId, status) {
+  const messageElements = document.querySelectorAll(`.msg-wrapper`);
+  for (let el of messageElements) {
+    const statusSpan = el.querySelector('.msg-status');
+    if (statusSpan && statusSpan.dataset.id == messageId) {
+      if (status === 'delivered') {
+        statusSpan.textContent = '✓✓';
+        statusSpan.className = 'msg-status delivered';
+      } else if (status === 'read') {
+        statusSpan.textContent = '✓✓💙';
+        statusSpan.className = 'msg-status read';
+      }
+      break;
+    }
+  }
+}
+
+function updateAllMessagesStatus(status) {
+  const messageElements = document.querySelectorAll(`.msg-wrapper.self .msg-status`);
+  messageElements.forEach(el => {
+    if (status === 'read') {
+      el.textContent = '✓✓💙';
+      el.className = 'msg-status read';
+    }
+  });
+}
+
+// --- Chat Room Functions ---
 
 function openChatWith(username) {
   AppState.activeChatPartner = username;
@@ -87,18 +194,22 @@ function openChatWith(username) {
   if (AppState.ws && AppState.ws.readyState === WebSocket.OPEN) {
     AppState.ws.send(JSON.stringify({ type: 'get_history', with: username }));
   }
+  
+  hideTypingIndicator();
 }
 
 function updateChatPartnerStatus(isOnline) {
-  const dot  = document.getElementById('chat-partner-status-dot');
+  const dot = document.getElementById('chat-partner-status-dot');
   const text = document.getElementById('chat-partner-status-text');
   if (isOnline) {
     dot.className = 'status-dot online';
+    if (text.dataset.originalText) delete text.dataset.originalText;
     text.textContent = 'ONLINE';
     text.style.color = 'var(--neon-green)';
     text.style.textShadow = '0 0 5px rgba(57, 255, 20, 0.4)';
   } else {
     dot.className = 'status-dot offline';
+    if (text.dataset.originalText) delete text.dataset.originalText;
     text.textContent = 'OFFLINE';
     text.style.color = 'var(--text-muted)';
     text.style.textShadow = 'none';
@@ -111,7 +222,7 @@ function exitChat() {
   loadUsers();
 }
 
-// --- Xử lý đính kèm ảnh/video ---
+// --- Media Attachment ---
 
 function triggerMediaInput() {
   document.getElementById('media-input').click();
@@ -121,8 +232,7 @@ function handleMediaSelect(event) {
   const file = event.target.files[0];
   if (!file) return;
 
-  // Giới hạn kích thước file 8MB để tránh nghẽn WebSocket
-  const MAX_SIZE = 8 * 1024 * 1024; // 8MB
+  const MAX_SIZE = 8 * 1024 * 1024;
   if (file.size > MAX_SIZE) {
     alert('LỖI MẠNG LƯỚI: Kích thước file vượt quá giới hạn cho phép (8MB).');
     clearMediaSelection();
@@ -134,7 +244,6 @@ function handleMediaSelect(event) {
     AppState.selectedMedia = e.target.result;
     AppState.selectedMediaType = file.type;
 
-    // Cập nhật giao diện hộp xem trước
     const previewContainer = document.getElementById('media-preview-container');
     const previewWrapper = document.getElementById('media-preview-wrapper');
     const previewName = document.getElementById('media-preview-name');
@@ -172,13 +281,12 @@ function clearMediaSelection() {
 function handleSendMessage(e) {
   e.preventDefault();
   const field = document.getElementById('chat-input-field');
-  const text  = field.value.trim();
+  const text = field.value.trim();
   
   if (!AppState.activeChatPartner) return;
   if (!text && !AppState.selectedMedia) return;
 
   if (AppState.ws && AppState.ws.readyState === WebSocket.OPEN) {
-    // 1. Gửi tệp tin đính kèm trước (nếu có)
     if (AppState.selectedMedia) {
       AppState.ws.send(JSON.stringify({ 
         type: 'send_message', 
@@ -188,7 +296,6 @@ function handleSendMessage(e) {
       clearMediaSelection();
     }
 
-    // 2. Gửi tin nhắn văn bản đi kèm sau (nếu có)
     if (text) {
       AppState.ws.send(JSON.stringify({ 
         type: 'send_message', 
@@ -197,13 +304,15 @@ function handleSendMessage(e) {
       }));
       field.value = '';
       field.focus();
+      sendTypingStop();
+      if (typingTimeout) clearTimeout(typingTimeout);
     }
   } else {
     alert('Kênh WebSocket đã bị ngắt kết nối. Đang thử kết nối lại...');
   }
 }
 
-// --- Render helpers ---
+// --- Render Helpers ---
 
 function appendChatMessage(msg) {
   const messagesArea = document.getElementById('messages-area');
@@ -214,19 +323,30 @@ function appendChatMessage(msg) {
   const wrapper = document.createElement('div');
   wrapper.className = `msg-wrapper ${isSelf ? 'self' : 'other'}`;
 
-  // Kiểm tra xem tin nhắn là text hay file Base64 đính kèm
   let bubbleContent = '';
-  if (msg.text.startsWith('data:image/')) {
+  if (msg.text && msg.text.startsWith('data:image/')) {
     bubbleContent = `<img src="${msg.text}" class="chat-media-img" onclick="openLightbox(this.src)" title="Nhấp để phóng to ảnh trực tiếp trong ứng dụng" alt="Ảnh đính kèm">`;
-  } else if (msg.text.startsWith('data:video/')) {
+  } else if (msg.text && msg.text.startsWith('data:video/')) {
     bubbleContent = `<video src="${msg.text}" controls class="chat-media-vid"></video>`;
   } else {
-    bubbleContent = escapeHTML(msg.text);
+    bubbleContent = escapeHTML(msg.text || '');
+  }
+
+  // Read receipt status
+  let statusIcon = '';
+  if (isSelf) {
+    if (msg.read_at) {
+      statusIcon = '<span class="msg-status read" data-id="' + msg.id + '">✓✓💙</span>';
+    } else if (msg.delivered) {
+      statusIcon = '<span class="msg-status delivered" data-id="' + msg.id + '">✓✓</span>';
+    } else {
+      statusIcon = '<span class="msg-status sent" data-id="' + msg.id + '">✓</span>';
+    }
   }
 
   wrapper.innerHTML = `
     <div class="msg-sender">${msg.sender}</div>
-    <div class="msg-bubble">${bubbleContent}</div>
+    <div class="msg-bubble">${bubbleContent}${statusIcon}</div>
     <div class="msg-time">${formatTime(msg.timestamp)}</div>
   `;
   messagesArea.appendChild(wrapper);
@@ -245,7 +365,7 @@ function appendSystemMessage(text) {
   scrollToBottom();
 }
 
-// --- Xử lý phóng to ảnh (Lightbox) ---
+// --- Lightbox ---
 
 function openLightbox(src) {
   const overlay = document.getElementById('lightbox-overlay');
@@ -266,3 +386,23 @@ function closeLightbox() {
     img.src = '';
   }, 200);
 }
+
+// --- Typing Event Listener ---
+
+document.addEventListener('DOMContentLoaded', () => {
+  const inputField = document.getElementById('chat-input-field');
+  if (inputField) {
+    inputField.addEventListener('input', () => {
+      if (!AppState.activeChatPartner) return;
+      
+      if (inputField.value.length > 0) {
+        sendTypingStart();
+        if (typingTimeout) clearTimeout(typingTimeout);
+        typingTimeout = setTimeout(() => sendTypingStop(), 1500);
+      } else {
+        sendTypingStop();
+        if (typingTimeout) clearTimeout(typingTimeout);
+      }
+    });
+  }
+});

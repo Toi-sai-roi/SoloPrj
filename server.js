@@ -1,17 +1,17 @@
-const http    = require('http');
-const fs      = require('fs');
-const path    = require('path');
-const crypto  = require('crypto');
-const ws      = require('ws');
-const jwt     = require('jsonwebtoken');
-const { DatabaseSync } = require('node:sqlite'); 
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const ws = require('ws');
+const jwt = require('jsonwebtoken');
+const { DatabaseSync } = require('node:sqlite');
 
 // ==========================================
 // CONFIG
 // ==========================================
-const PORT       = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'cyberpunk-neon-glow-secret-2026';
-const DB_PATH    = path.join(__dirname, 'chat.db');
+const DB_PATH = path.join(__dirname, 'chat.db');
 
 // ==========================================
 // DATABASE
@@ -32,12 +32,33 @@ db.exec(`
     receiver  TEXT NOT NULL,
     text      TEXT NOT NULL,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    delivered BOOLEAN DEFAULT 0,
+    read_at   DATETIME,
     FOREIGN KEY (sender)   REFERENCES users(username),
     FOREIGN KEY (receiver) REFERENCES users(username)
   );
 `);
 
 console.log('✅ SQLite database khởi tạo thành công:', DB_PATH);
+
+// ==========================================
+// DATABASE HELPER FUNCTIONS (thêm vào đây)
+// ==========================================
+function markMessagesDelivered(sender, receiver) {
+  db.prepare(`
+    UPDATE messages 
+    SET delivered = 1 
+    WHERE sender = ? AND receiver = ? AND delivered = 0
+  `).run(sender, receiver);
+}
+
+function markMessagesRead(sender, receiver) {
+  db.prepare(`
+    UPDATE messages 
+    SET read_at = CURRENT_TIMESTAMP 
+    WHERE sender = ? AND receiver = ? AND read_at IS NULL
+  `).run(sender, receiver);
+}
 
 // ==========================================
 // ONLINE USERS MAP
@@ -48,7 +69,7 @@ const onlineUsers = new Map();
 // ==========================================
 // AUTH HELPERS
 // ==========================================
-function generateSalt()             { return crypto.randomBytes(16).toString('hex'); }
+function generateSalt() { return crypto.randomBytes(16).toString('hex'); }
 function hashPassword(password, salt) {
   return crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
 }
@@ -86,19 +107,19 @@ function authenticateToken(req) {
 // ==========================================
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
-  '.css':  'text/css',
-  '.js':   'application/javascript',
-  '.png':  'image/png',
-  '.jpg':  'image/jpeg',
-  '.svg':  'image/svg+xml',
-  '.ico':  'image/x-icon',
+  '.css': 'text/css',
+  '.js': 'application/javascript',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
 };
 
 function serveStatic(req, res) {
   // Default sang index.html cho mọi route không phải file
   let filePath = path.join(__dirname, 'public', req.url === '/' ? 'index.html' : req.url);
-  const ext    = path.extname(filePath);
-  const mime   = MIME_TYPES[ext] || 'text/plain';
+  const ext = path.extname(filePath);
+  const mime = MIME_TYPES[ext] || 'text/plain';
 
   fs.readFile(filePath, (err, content) => {
     if (err) {
@@ -119,7 +140,7 @@ function serveStatic(req, res) {
 // HTTP SERVER
 // ==========================================
 const server = http.createServer(async (req, res) => {
-  const url      = new URL(req.url, `http://${req.headers.host}`);
+  const url = new URL(req.url, `http://${req.headers.host}`);
   const pathname = url.pathname;
 
   // CORS headers (optional, hữu ích khi dev local)
@@ -162,7 +183,7 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, 400, { error: 'Username và password không được để trống' });
 
       const clean = username.trim().toLowerCase();
-      const user  = db.prepare('SELECT * FROM users WHERE username = ?').get(clean);
+      const user = db.prepare('SELECT * FROM users WHERE username = ?').get(clean);
       if (!user || hashPassword(password, user.salt) !== user.password_hash)
         return sendJSON(res, 400, { error: 'Tài khoản hoặc mật khẩu không chính xác' });
 
@@ -205,7 +226,7 @@ const wss = new ws.Server({ noServer: true });
 
 server.on('upgrade', (request, socket, head) => {
   try {
-    const url   = new URL(request.url, `http://${request.headers.host}`);
+    const url = new URL(request.url, `http://${request.headers.host}`);
     const token = url.searchParams.get('token');
     if (!token) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return; }
 
@@ -240,33 +261,80 @@ wss.on('connection', (wsConn, request, username) => {
   if (!onlineUsers.has(username)) onlineUsers.set(username, new Set());
   onlineUsers.get(username).add(wsConn);
 
+  // Gửi pending read receipts khi user online
   if (onlineUsers.get(username).size === 1) {
     broadcastStatusChange(username, true);
     broadcastSystemMessage(`${username} đã đăng nhập vào mạng lưới.`);
+
+    // Gửi read receipts cho tất cả tin nhắn chưa đọc
+    const unreadMessages = db.prepare(`
+    SELECT DISTINCT sender FROM messages 
+    WHERE receiver = ? AND read_at IS NULL
+  `).all(username);
+
+    unreadMessages.forEach(msg => {
+      if (onlineUsers.has(msg.sender)) {
+        const readReceipt = { type: 'read_receipt', reader: username, with: msg.sender };
+        onlineUsers.get(msg.sender).forEach(c => {
+          if (c.readyState === ws.OPEN) c.send(JSON.stringify(readReceipt));
+        });
+      }
+    });
   }
 
   wsConn.on('message', (messageStr) => {
     try {
       const data = JSON.parse(messageStr);
 
+      // === TYPING INDICATOR ===
+      if (data.type === 'typing') {
+        const { to, isTyping } = data;
+        if (!to) return;
+        const typingMsg = { type: 'typing', sender: username, isTyping };
+        if (onlineUsers.has(to)) {
+          onlineUsers.get(to).forEach(c => {
+            if (c.readyState === ws.OPEN) c.send(JSON.stringify(typingMsg));
+          });
+        }
+        return;
+      }
+
+      // === GET HISTORY ===
       if (data.type === 'get_history') {
         const { with: withUser } = data;
         if (!withUser) return;
+
+        // Mark messages as read when opening chat
+        markMessagesRead(withUser, username);
+
+        // Broadcast read status to sender
+        if (onlineUsers.has(withUser)) {
+          const readReceipt = { type: 'read_receipt', reader: username, with: withUser };
+          onlineUsers.get(withUser).forEach(c => {
+            if (c.readyState === ws.OPEN) c.send(JSON.stringify(readReceipt));
+          });
+        }
+
         const history = db.prepare(`
-          SELECT sender, receiver, text, timestamp FROM messages
-          WHERE (sender = ? AND receiver = ?) OR (sender = ? AND receiver = ?)
-          ORDER BY timestamp ASC
-        `).all(username, withUser, withUser, username);
+        SELECT id, sender, receiver, text, timestamp, delivered, read_at 
+        FROM messages 
+        WHERE (sender = ? AND receiver = ?) OR (sender = ? AND receiver = ?)
+        ORDER BY timestamp ASC
+      `).all(username, withUser, withUser, username);
+
         wsConn.send(JSON.stringify({ type: 'history', with: withUser, messages: history }));
+        return;
       }
 
+      // === SEND MESSAGE ===
       if (data.type === 'send_message') {
         const { to, text } = data;
         if (!to || !text?.trim()) return;
         const cleanText = text.trim();
 
-        const info = db.prepare('INSERT INTO messages (sender, receiver, text) VALUES (?, ?, ?)')
-          .run(username, to, cleanText);
+        const info = db.prepare(`
+        INSERT INTO messages (sender, receiver, text) VALUES (?, ?, ?)
+      `).run(username, to, cleanText);
 
         const chatMsg = {
           type: 'message',
@@ -274,24 +342,45 @@ wss.on('connection', (wsConn, request, username) => {
           sender: username,
           receiver: to,
           text: cleanText,
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          delivered: 0,
+          read_at: null
         };
         const payload = JSON.stringify(chatMsg);
 
-        // Gửi đến người nhận
-        if (onlineUsers.has(to))
-          onlineUsers.get(to).forEach(c => c.readyState === ws.OPEN && c.send(payload));
+        // Gửi đến người nhận (nếu online)
+        let isReceiverOnline = false;
+        if (onlineUsers.has(to)) {
+          isReceiverOnline = true;
+          onlineUsers.get(to).forEach(c => {
+            if (c.readyState === ws.OPEN) c.send(payload);
+          });
+          // Mark as delivered immediately if receiver is online
+          markMessagesDelivered(username, to);
+          chatMsg.delivered = 1;
+        }
 
         // Đồng bộ tab khác của người gửi
-        if (onlineUsers.has(username))
+        if (onlineUsers.has(username)) {
           onlineUsers.get(username).forEach(c => {
-            if (c !== wsConn && c.readyState === ws.OPEN) c.send(payload);
+            if (c !== wsConn && c.readyState === ws.OPEN) {
+              c.send(JSON.stringify({ ...chatMsg, self: true }));
+            }
           });
+        }
 
-        // Phản hồi tab hiện tại (self: true)
+        // Phản hồi tab hiện tại
         wsConn.send(JSON.stringify({ ...chatMsg, self: true }));
-      }
 
+        // Gửi delivered receipt nếu receiver online
+        if (isReceiverOnline && onlineUsers.has(username)) {
+          const deliveredReceipt = { type: 'delivered_receipt', messageId: chatMsg.id, to: username, from: to };
+          onlineUsers.get(username).forEach(c => {
+            if (c.readyState === ws.OPEN) c.send(JSON.stringify(deliveredReceipt));
+          });
+        }
+        return;
+      }
     } catch (err) {
       console.error('WS message error:', err.message);
     }
