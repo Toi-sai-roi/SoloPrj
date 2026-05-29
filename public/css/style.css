@@ -277,6 +277,8 @@ h1, h2, h3, button, input { font-family: var(--font-tech); letter-spacing: 1px; 
 .msg-wrapper {
   display: flex; flex-direction: column; max-width: 75%;
   animation: msg-slide-up 0.25s cubic-bezier(0.075, 0.82, 0.165, 1);
+  position: relative;
+
 }
 @keyframes msg-slide-up {
   from { opacity: 0; transform: translateY(10px); }
@@ -429,34 +431,38 @@ h1, h2, h3, button, input { font-family: var(--font-tech); letter-spacing: 1px; 
 .msg-status.read { color: var(--neon-green); text-shadow: 0 0 4px var(--neon-green); }
 
 /* Message Reactions */
-.msg-bubble {
+/* Message Reactions - Zalo Style (Fix đúng vị trí) */
+.msg-wrapper {
   position: relative;
+  margin-bottom: 8px;
 }
 
+/* Reaction trigger */
 .reaction-trigger {
-  position: absolute;
-  bottom: -12px;
+  display: inline-flex;
+  margin-left: 8px;
   background: var(--bg-card);
   border: 1px solid var(--neon-pink);
-  border-radius: 20px;
-  padding: 4px 8px;
-  font-size: 12px;
+  border-radius: 30px;
+  padding: 4px 10px;
+  font-size: 14px;
   cursor: pointer;
   opacity: 0;
   transition: all 0.2s ease;
-  font-family: var(--font-tech);
-  color: var(--neon-pink);
-  z-index: 10;
   backdrop-filter: blur(8px);
   line-height: 1;
 }
 
-/* Tin nhắn của đối phương (bên trái) → trigger ở bên trái */
-.msg-wrapper.other .reaction-trigger {
-  left: -8px;
+.msg-wrapper.self .reaction-trigger {
+  margin-left: 8px;
 }
 
-.msg-bubble:hover .reaction-trigger {
+.msg-wrapper.other .reaction-trigger {
+  margin-right: 8px;
+  margin-left: 0;
+}
+
+.msg-wrapper:hover .reaction-trigger {
   opacity: 1;
 }
 
@@ -466,80 +472,36 @@ h1, h2, h3, button, input { font-family: var(--font-tech); letter-spacing: 1px; 
   box-shadow: 0 0 10px var(--neon-pink);
 }
 
-.reactions-container {
-  display: flex;
-  gap: 4px;
-  position: absolute;
-  bottom: -16px;
-  z-index: 9;
-  max-width: calc(100% - 40px);
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.reaction-badge {
-  background: var(--bg-card);
-  backdrop-filter: blur(8px);
-  border: 1px solid var(--border-color);
-  border-radius: 30px;
-  padding: 2px 8px;
-  font-size: 12px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-family: var(--font-body);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-  white-space: nowrap;
-}
-
-.reaction-badge:hover {
-  border-color: var(--neon-cyan);
-  background: rgba(0, 240, 255, 0.2);
-  transform: scale(1.05);
-}
-
-.reaction-badge .reaction-emoji {
-  font-size: 13px;
-}
-
-.reaction-badge .reaction-count {
-  color: var(--text-muted);
-  font-size: 10px;
-  font-weight: 600;
-}
-
 /* Reaction Picker */
 .reaction-picker {
   position: fixed;
   background: var(--bg-card);
   backdrop-filter: blur(20px);
   border: 1px solid var(--neon-cyan);
-  border-radius: 40px;
+  border-radius: 50px;
   padding: 8px 16px;
   display: flex;
   gap: 12px;
   z-index: 1000;
-  box-shadow: 0 0 30px rgba(0, 240, 255, 0.4);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5), 0 0 20px rgba(0, 240, 255, 0.3);
   animation: picker-pop 0.2s ease;
 }
 
 @keyframes picker-pop {
   from {
     opacity: 0;
-    transform: scale(0.8);
+    transform: scale(0.9) translateY(10px);
   }
   to {
     opacity: 1;
-    transform: scale(1);
+    transform: scale(1) translateY(0);
   }
 }
 
 .reaction-option {
   font-size: 28px;
   cursor: pointer;
-  padding: 4px;
+  padding: 6px;
   transition: all 0.15s ease;
   border-radius: 50%;
   width: 44px;
@@ -552,4 +514,196 @@ h1, h2, h3, button, input { font-family: var(--font-tech); letter-spacing: 1px; 
 .reaction-option:hover {
   background: rgba(0, 240, 255, 0.2);
   transform: scale(1.2);
+}
+
+/* Khung bọc meta (gồm reaction badge và nút 😊) */
+.msg-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  width: 100%;
+}
+
+/* Tin nhắn của bản thân: Căn toàn bộ về bên phải */
+
+.msg-wrapper.self .msg-meta-row {
+  justify-content: flex-end;
+}
+
+/* Tin nhắn của đối phương: Căn toàn bộ về bên trái */
+
+.msg-wrapper.other .msg-meta-row {
+  justify-content: flex-start;
+  flex-direction: row-reverse; /* Đảo ngược để nút 😊 nằm bên phải cục reaction badge cho đẹp */
+}
+
+/* Giữ dòng thời gian hiển thị gọn gàng */
+.msg-time {
+  font-size: 9px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  width: 100%;
+}
+.msg-wrapper.self .msg-time {
+  text-align: right;
+}
+.msg-wrapper.other .msg-time {
+  text-align: left;
+}
+
+.msg-content-node {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  position: relative;
+  max-width: 100%;
+}
+
+/* Đảo hướng nút 😊 ra sau tin nhắn tùy thuộc vào người gửi */
+.msg-wrapper.self .msg-content-node {
+  flex-direction: row; /* Nút 😊 nằm trước (bên trái), rồi mới đến Bong bóng chat */
+  margin-left: auto;   /* Đẩy toàn bộ cụm sang mép phải màn hình */
+}
+.msg-wrapper.self .msg-box-meta {
+  align-items: flex-end; /* Vẫn giữ bong bóng chat canh lề phải */
+}
+.msg-wrapper.other .msg-content-node {
+  flex-direction: row-reverse; /* Bong bóng chat nằm trước, nút 😊 nằm sau (bên phải) */
+  margin-right: auto;          /* Đẩy toàn bộ cụm sang mép trái màn hình */
+}
+.msg-wrapper.other .msg-box-meta {
+  align-items: flex-start; 
+}
+/* Tinh chỉnh Bong bóng Chat để làm gốc tọa độ (Relative) */
+.msg-bubble {
+  position: relative;
+  padding: 12px 18px;
+  margin-bottom: 6px; /* Chừa khoảng trống nhỏ cho reaction đè lên viền */
+}
+
+/* Khung chứa các badge Emoji phản hồi - ĐÈ LÊN GÓC PHẢI BÊN DƯỚI BUBBLE */
+.reactions-row {
+  position: absolute;
+  bottom: -12px;     /* Đè cố định lên đường legend biên dưới */
+  right: 12px;        /* ÉP CHẶT CẢ 2 PHE LUÔN NẰM Ở GÓC DƯỚI BÊN PHẢI */
+  left: auto;         /* Xóa bỏ thuộc tính left nếu có */
+  display: flex;
+  gap: 4px;
+  z-index: 5;
+  pointer-events: auto;
+}
+/* NGƯỜI GỬI (Bên phải): Neo lề theo góc PHẢI, emoji xếp hàng và đẩy dần qua TRÁI */
+.msg-wrapper.self .reactions-row {
+  flex-direction: row; 
+  justify-content: flex-end;
+}
+/* NGƯỜI NHẬN (Bên trái): Neo lề theo góc TRÁI, emoji xếp hàng và đẩy dần qua PHẢI */
+.msg-wrapper.other .reactions-row {
+  flex-direction: row-reverse; 
+  justify-content: flex-end;
+}
+/* Thiết kế Badge Reactions bảo đảm co giãn chiều rộng tối ưu */
+.reaction-badge {
+  background: #0d0d13;
+  border: 1px solid rgba(0, 240, 255, 0.4);
+  box-shadow: 0 0 8px rgba(0, 240, 255, 0.2), inset 0 0 4px rgba(0, 240, 255, 0.1);
+  border-radius: 20px;
+  padding: 2px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  width: max-content; /* Luôn giữ kích thước vừa vặn với nội dung chữ/số */
+}
+
+.reaction-badge:hover {
+  border-color: var(--neon-pink);
+  box-shadow: 0 0 12px var(--neon-pink);
+}
+
+.reaction-badge .reaction-emoji {
+  font-size: 12px;
+}
+
+.reaction-badge .reaction-count {
+  font-size: 10px;
+  font-family: var(--font-tech);
+  color: var(--neon-cyan);
+  font-weight: bold;
+}
+
+/* Trigger hiển thị nút 😊 khi hover chuột vào vùng tin nhắn */
+.reaction-trigger {
+  font-size: 16px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  user-select: none;
+  padding: 4px;
+}
+
+.msg-wrapper:hover .reaction-trigger {
+  opacity: 0.7;
+}
+
+.reaction-trigger:hover {
+  opacity: 1 !important;
+  transform: scale(1.2);
+}
+
+/* Định dạng thanh chọn Emoji (Picker) - Chống tràn màn hình */
+.reaction-picker {
+  max-width: calc(100vw - 32px); /* Không bao giờ vượt quá độ rộng viewport */
+  background: rgba(10, 10, 18, 0.95);
+  backdrop-filter: blur(15px);
+  border: 1px solid var(--neon-pink);
+  box-shadow: 0 0 25px rgba(255, 0, 127, 0.3);
+  border-radius: 30px;
+  padding: 6px 12px;
+  display: flex;
+  gap: 8px;
+  z-index: 9999;
+}
+
+.reaction-option {
+  font-size: 24px;
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  border-radius: 50%;
+}
+
+.reaction-option:hover {
+  background: rgba(255, 0, 127, 0.15);
+  transform: scale(1.25);
+}
+
+/* Chỉnh lại dòng thời gian cho mượt mà */
+.msg-time {
+  width: 100%;
+  font-size: 9px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  clear: both;
+}
+/* .msg-wrapper.self .msg-time { text-align: right; } */
+.msg-wrapper.self .msg-time {
+  text-align: left;      /* Căn chữ qua lề trái */
+  padding-left: 55px;     /* Thụt lề vào một chút cho đẹp */
+  align-self: flex-start; /* Ép block thời gian dạt sang trái của cụm tin nhắn */
+}
+.msg-wrapper.other .msg-content-node {
+  flex-direction: row-reverse; 
+  margin-right: auto;          
+}
+.msg-wrapper.other .msg-time {
+  text-align: left;
+  padding-left: 4px;
 }

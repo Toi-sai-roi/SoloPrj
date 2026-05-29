@@ -4,7 +4,7 @@ const path    = require('path');
 const crypto  = require('crypto');
 const ws      = require('ws');
 const jwt     = require('jsonwebtoken');
-const { DatabaseSync } = require('node:sqlite');
+const Database = require('better-sqlite3'); // FIX #1: đã đổi từ node:sqlite sang better-sqlite3
 
 // ==========================================
 // CONFIG
@@ -16,7 +16,7 @@ const DB_PATH    = path.join(__dirname, 'chat.db');
 // ==========================================
 // DATABASE
 // ==========================================
-const db = new DatabaseSync(DB_PATH);
+const db = new Database(DB_PATH);
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
@@ -43,10 +43,10 @@ db.exec(`
     message_id INTEGER NOT NULL,
     username   TEXT NOT NULL,
     emoji      TEXT NOT NULL,
+    count      INTEGER DEFAULT 1, -- Lưu số lần user đó spam emoji này
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
-    FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE,
-    UNIQUE(message_id, username)
+    FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE
   );
 `);
 
@@ -55,10 +55,7 @@ console.log('✅ SQLite database:', DB_PATH);
 // ==========================================
 // DATABASE HELPER FUNCTIONS (thêm vào đây)
 // ==========================================
-function markMessagesDelivered(sender, receiver) {
-  db.prepare(`UPDATE messages SET delivered = 1 WHERE sender = ? AND receiver = ? AND delivered = 0`).run(sender, receiver);
-}
-
+// FIX #2: Xóa bỏ markMessagesDelivered - không cần dùng nữa
 function markMessagesRead(sender, receiver) {
   db.prepare(`UPDATE messages SET read_at = CURRENT_TIMESTAMP WHERE sender = ? AND receiver = ? AND read_at IS NULL`).run(sender, receiver);
 }
@@ -239,6 +236,20 @@ function broadcastSystemMessage(text) {
 wss.on('connection', (wsConn, request, username) => {
   console.log(`[WS] ${username} connected`);
 
+  // === FIX #4: HEARTBEAT (PING/PONG) ===
+  let isAlive = true;
+  wsConn.on('pong', () => { isAlive = true; });
+  
+  const pingInterval = setInterval(() => {
+    if (!isAlive) {
+      console.log(`[WS] ${username} heartbeat timeout, terminating`);
+      // Đã loại bỏ clearInterval ở đây, để sự kiện 'close' lo trọn gói
+      return wsConn.terminate(); 
+    }
+    isAlive = false;
+    wsConn.ping();
+  }, 30000);
+
   if (!onlineUsers.has(username)) onlineUsers.set(username, new Set());
   onlineUsers.get(username).add(wsConn);
 
@@ -291,15 +302,20 @@ wss.on('connection', (wsConn, request, username) => {
             if (c.readyState === ws.OPEN) c.send(JSON.stringify(readReceipt));
           });
         }
-        const history = db.prepare(`
+        // FIX #3: Truy vấn lịch sử tin nhắn với reactions trong 1 câu SQL duy nhất, tránh N+1 query
+        const history = db.prepare(` 
           SELECT 
             m.id, m.sender, m.receiver, m.text, m.timestamp, m.delivered, m.read_at,
-            json_group_object(r.username, r.emoji) as reactions,
-            json_group_object(r.username, strftime('%s', r.created_at)) as reaction_timestamps
+            COALESCE((
+              SELECT json_group_object(emoji, total_count) 
+              FROM (SELECT emoji, SUM(count) as total_count FROM reactions WHERE message_id = m.id GROUP BY emoji)
+            ), '{}') as reactions,
+            COALESCE((
+              SELECT json_group_object(emoji, max_ts) 
+              FROM (SELECT emoji, MAX(strftime('%s', created_at)) as max_ts FROM reactions WHERE message_id = m.id GROUP BY emoji)
+            ), '{}') as reaction_timestamps
           FROM messages m
-          LEFT JOIN reactions r ON m.id = r.message_id
           WHERE (m.sender = ? AND m.receiver = ?) OR (m.sender = ? AND m.receiver = ?)
-          GROUP BY m.id
           ORDER BY m.timestamp ASC
         `).all(username, withUser, withUser, username);
         wsConn.send(JSON.stringify({ type: 'history', with: withUser, messages: history }));
@@ -307,43 +323,58 @@ wss.on('connection', (wsConn, request, username) => {
       }
 
       // === ADD REACTION ===
+      // Thay thế toàn bộ case 'add_reaction' trong server.js:
       if (data.type === 'add_reaction') {
         const { messageId, emoji } = data;
         if (!messageId || !emoji) return;
         try {
-          db.prepare(`
-            INSERT INTO reactions (message_id, username, emoji) 
-            VALUES (?, ?, ?)
-            ON CONFLICT(message_id, username) DO UPDATE SET emoji = excluded.emoji, created_at = CURRENT_TIMESTAMP
-          `).run(messageId, username, emoji);
+          // Kiểm tra xem cặp (tin nhắn, user, emoji này) đã tồn tại chưa
+          const existing = db.prepare(`
+            SELECT id FROM reactions WHERE message_id = ? AND username = ? AND emoji = ?
+          `).get(messageId, username, emoji);
+
+          if (existing) {
+            // Nếu đã từng thả rồi: Cộng dồn số lượng lên và update thời gian mới nhất
+            db.prepare(`
+              UPDATE reactions SET count = count + 1, created_at = CURRENT_TIMESTAMP WHERE id = ?
+            `).run(existing.id);
+          } else {
+            // Nếu là emoji mới hoàn toàn của user này: Thêm dòng mới vào DB với count = 1
+            db.prepare(`
+              INSERT INTO reactions (message_id, username, emoji, count) VALUES (?, ?, ?, 1)
+            `).run(messageId, username, emoji);
+          }
           
           const message = db.prepare('SELECT sender, receiver FROM messages WHERE id = ?').get(messageId);
           if (message) {
+            // Lấy tổng số lượng gộp của từng loại emoji cho tin nhắn này
             const allReactions = db.prepare(`
-              SELECT username, emoji, strftime('%s', created_at) as ts FROM reactions WHERE message_id = ?
+              SELECT emoji, SUM(count) as total_count, MAX(strftime('%s', created_at)) as max_ts 
+              FROM reactions 
+              WHERE message_id = ? 
+              GROUP BY emoji
             `).all(messageId);
+
             const reactionMap = {};
             const reactionTimestamps = {};
+            
             for (const r of allReactions) {
-              reactionMap[r.username] = r.emoji;
-              reactionTimestamps[r.username] = parseInt(r.ts);
+              reactionMap[r.emoji] = Number(r.total_count);
+              reactionTimestamps[r.emoji] = parseInt(r.max_ts);
             }
+
             const reactionMsg = {
               type: 'reaction_update',
               messageId: messageId,
-              reactions: reactionMap,
+              reactions: reactionMap, // Trả về dạng: {"❤️": 12, "😂": 5}
               reactionTimestamps: reactionTimestamps
             };
             const payload = JSON.stringify(reactionMsg);
             if (onlineUsers.has(message.sender)) {
-              onlineUsers.get(message.sender).forEach(c => {
-                if (c.readyState === ws.OPEN) c.send(payload);
-              });
+              onlineUsers.get(message.sender).forEach(c => { if (c.readyState === ws.OPEN) c.send(payload); });
             }
             if (onlineUsers.has(message.receiver)) {
-              onlineUsers.get(message.receiver).forEach(c => {
-                if (c.readyState === ws.OPEN) c.send(payload);
-              });
+              onlineUsers.get(message.receiver).forEach(c => { if (c.readyState === ws.OPEN) c.send(payload); });
             }
           }
         } catch (err) {
@@ -357,7 +388,16 @@ wss.on('connection', (wsConn, request, username) => {
         const { to, text } = data;
         if (!to || !text?.trim()) return;
         const cleanText = text.trim();
-        const info = db.prepare(`INSERT INTO messages (sender, receiver, text) VALUES (?, ?, ?)`).run(username, to, cleanText);
+        
+        // FIX #2: Kiểm tra online TRƯỚC khi INSERT, gán delivered đúng ngay từ đầu
+        const isReceiverOnline = onlineUsers.has(to);
+        const deliveredValue = isReceiverOnline ? 1 : 0;
+        
+        const info = db.prepare(`
+          INSERT INTO messages (sender, receiver, text, delivered) 
+          VALUES (?, ?, ?, ?)
+        `).run(username, to, cleanText, deliveredValue);
+        
         const chatMsg = {
           type: 'message',
           id: Number(info.lastInsertRowid),
@@ -365,21 +405,16 @@ wss.on('connection', (wsConn, request, username) => {
           receiver: to,
           text: cleanText,
           timestamp: new Date().toISOString(),
-          delivered: 0,
+          delivered: deliveredValue,
           read_at: null
         };
         const payload = JSON.stringify(chatMsg);
         
         // Gửi đến người nhận (nếu online)
-        let isReceiverOnline = false;
-        if (onlineUsers.has(to)) {
-          isReceiverOnline = true;
+        if (isReceiverOnline) {
           onlineUsers.get(to).forEach(c => {
             if (c.readyState === ws.OPEN) c.send(payload);
           });
-          // Mark as delivered immediately if receiver is online
-          markMessagesDelivered(username, to);
-          chatMsg.delivered = 1;
         }
         
         // Đồng bộ tab khác của người gửi
@@ -394,7 +429,7 @@ wss.on('connection', (wsConn, request, username) => {
         // Phản hồi tab hiện tại
         wsConn.send(JSON.stringify({ ...chatMsg, self: true }));
         
-        // Gửi delivered receipt nếu receiver online
+        // Gửi delivered receipt nếu receiver online (chỉ để báo UI)
         if (isReceiverOnline && onlineUsers.has(username)) {
           const deliveredReceipt = { type: 'delivered_receipt', messageId: chatMsg.id, to: username, from: to };
           onlineUsers.get(username).forEach(c => {
@@ -410,6 +445,7 @@ wss.on('connection', (wsConn, request, username) => {
 
   wsConn.on('close', () => {
     console.log(`[WS] ${username} disconnected`);
+    clearInterval(pingInterval); // Dọn dẹp duy nhất tại đây cho mọi trường hợp đóng kết nối
     const conns = onlineUsers.get(username);
     if (conns) {
       conns.delete(wsConn);
