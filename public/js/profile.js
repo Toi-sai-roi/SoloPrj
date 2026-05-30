@@ -44,27 +44,29 @@ async function openProfile(username) {
         // 3. Xử lý logic sinh Nút bấm tương tác dựa trên trạng thái quan hệ
         let actionButtonsHtml = '';
         if (!isMe) {
+            let relButton = '';
             if (relData.relation === 'none') {
-                actionButtonsHtml = `<button class="cyber-btn" onclick="handleFriendAction('${username}', 'request')" style="width:70%; border-color:var(--neon-cyan); color:var(--neon-cyan);">[ CONNECT_NODE ]</button>`;
+                relButton = `<button class="cyber-btn" onclick="handleFriendAction('${username}', 'request')" style="flex: 1; border-color:var(--neon-cyan); color:var(--neon-cyan);">[ CONNECT_NODE ]</button>`;
             } else if (relData.relation === 'pending' && relData.sender === 'me') {
-                actionButtonsHtml = `<button class="cyber-btn" onclick="handleFriendAction('${username}', 'cancel')" style="width:70%; border-color:var(--text-muted); color:var(--text-muted);">[ PENDING_CANCEL ]</button>`;
+                relButton = `<button class="cyber-btn" onclick="handleFriendAction('${username}', 'cancel')" style="flex: 1; border-color:var(--text-muted); color:var(--text-muted);">[ PENDING_CANCEL ]</button>`;
             } else if (relData.relation === 'pending' && relData.sender === 'them') {
-                actionButtonsHtml = `
-                    <div style="display:flex; gap:10px; width:70%;">
-                        <button class="cyber-btn" onclick="handleFriendAction('${username}', 'request')" style="flex:1; border-color:var(--neon-green); color:var(--neon-green);">[ ACCEPT ]</button>
-                        <button class="cyber-btn" onclick="handleFriendAction('${username}', 'cancel')" style="flex:1; border-color:var(--neon-pink); color:var(--neon-pink);">[ DECLINE ]</button>
-                    </div>
-                `;
+                relButton = `
+            <button class="cyber-btn" onclick="handleFriendAction('${username}', 'request')" style="flex: 1; border-color:var(--neon-green); color:var(--neon-green);">[ ACCEPT ]</button>
+            <button class="cyber-btn" onclick="handleFriendAction('${username}', 'cancel')" style="flex: 1; border-color:var(--neon-pink); color:var(--neon-pink);">[ DECLINE ]</button>
+        `;
             } else if (relData.relation === 'friends') {
-                actionButtonsHtml = `<button class="cyber-btn" onclick="handleFriendAction('${username}', 'cancel')" style="width:70%; border-color:var(--neon-purple); color:var(--neon-purple);">[ DISCONNECT_NODE ]</button>`;
+                relButton = `<button class="cyber-btn" onclick="handleFriendAction('${username}', 'cancel')" style="flex: 1; border-color:var(--neon-purple); color:var(--neon-purple);">[ DISCONNECT_NODE ]</button>`;
             } else if (relData.relation === 'blocking') {
-                actionButtonsHtml = `<div style="color:var(--neon-pink); font-family:var(--font-tech); margin-top:10px;">[ NODE_BLOCKED_BY_YOU ]</div>`;
+                relButton = `<div style="flex: 1; color:var(--neon-pink); font-family:var(--font-tech); font-size:12px; display:flex; align-items:center;">[ NODE_BLOCKED_BY_YOU ]</div>`;
             }
 
-            // Luôn thêm nút Block màu đỏ trừ khi chính mình tự chặn mình
-            if (relData.relation !== 'blocking') {
-                actionButtonsHtml += `<button class="cyber-btn" onclick="handleBlockAction('${username}')" style="width:25%; border-color:var(--neon-pink); color:var(--neon-pink); margin-left:5%;">[ BLOCK ]</button>`;
-            }
+            // Bọc trong một hộp Flex để xếp ngang hoàn hảo không bao giờ vỡ dòng
+            actionButtonsHtml = `
+        <div style="display: flex; gap: 10px; width: 100%; align-items: center;">
+            ${relButton}
+            ${relData.relation !== 'blocking' ? `<button class="cyber-btn" onclick="handleBlockAction('${username}')" style="border-color:var(--neon-pink); color:var(--neon-pink); min-width: 80px;">[ BLOCK ]</button>` : ''}
+        </div>
+    `;
         }
 
         modal.innerHTML = `

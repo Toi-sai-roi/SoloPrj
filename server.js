@@ -210,12 +210,21 @@ const server = http.createServer(async (req, res) => {
     const payload = authenticateToken(req);
     if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
     try {
+      const me = payload.username;
       const allUsers = db.prepare('SELECT username, avatar FROM users ORDER BY username ASC').all();
-      const usersList = allUsers.map(u => ({
-        username: u.username,
-        avatar: u.avatar,
-        online: onlineUsers.has(u.username)
-      }));
+
+      const usersList = allUsers.map(u => {
+        // Kiểm tra xem giữa mình (me) và user này (u.username) có bất kỳ quan hệ chặn nào không
+        const hasBlock = db.prepare('SELECT 1 FROM blocks WHERE (blocker=? AND blocked=?) OR (blocker=? AND blocked=?)').get(me, u.username, u.username, me);
+
+        return {
+          username: u.username,
+          avatar: u.avatar,
+          // Nếu dính block thì ép cứng thành offline (false), nếu không dính thì check map online thực tế
+          online: hasBlock ? false : onlineUsers.has(u.username)
+        };
+      });
+
       return sendJSON(res, 200, usersList);
     } catch (err) {
       return sendJSON(res, 500, { error: 'Không thể lấy danh sách user' });
@@ -477,12 +486,19 @@ wss.on('connection', (wsConn, request, username) => {
       if (data.type === 'get_history') {
         const { with: withUser } = data;
         if (!withUser) return;
-        markMessagesRead(withUser, username);
-        if (onlineUsers.has(withUser)) {
-          const readReceipt = { type: 'read_receipt', reader: username, with: withUser };
-          onlineUsers.get(withUser).forEach(c => {
-            if (c.readyState === ws.OPEN) c.send(JSON.stringify(readReceipt));
-          });
+
+        // KIỂM TRA BLOCK TRƯỚC KHI ĐÁNH DẤU ĐÃ ĐỌC
+        const anyBlock = db.prepare('SELECT 1 FROM blocks WHERE (blocker=? AND blocked=?) OR (blocker=? AND blocked=?)').get(username, withUser, withUser, username);
+
+        if (!anyBlock) {
+          // Chỉ khi KHÔNG CÓ AI CHẶN AI thì mới cho phép mark Đã đọc và bắn read_receipt đi
+          markMessagesRead(withUser, username);
+          if (onlineUsers.has(withUser)) {
+            const readReceipt = { type: 'read_receipt', reader: username, with: withUser };
+            onlineUsers.get(withUser).forEach(c => {
+              if (c.readyState === 1) c.send(JSON.stringify(readReceipt));
+            });
+          }
         }
         const history = db.prepare(` 
           SELECT 
@@ -558,11 +574,35 @@ wss.on('connection', (wsConn, request, username) => {
         return;
       }
 
+      // =========================================================================
+      // THAY THẾ TOÀN BỘ BLOCK: if (data.type === 'send_message') TRONG server.js
+      // =========================================================================
       if (data.type === 'send_message') {
         const { to, text } = data;
         if (!to || !text?.trim()) return;
         const cleanText = text.trim();
 
+        // 1. Kiểm tra xem MÌNH (username) có đang CHẶN đối phương (to) hay không
+        const amIBlocking = db.prepare('SELECT 1 FROM blocks WHERE blocker = ? AND blocked = ?').get(username, to);
+        if (amIBlocking) {
+          // Khóa mõm ngay lập tức tại Front-End/Back-End, không cho người chặn gửi bậy
+          const sysMsg = { type: 'system', text: `THAO TÁC BỊ TỪ CHỐI: Bạn phải bỏ chặn ${to.toUpperCase()} trước khi gửi tin nhắn.` };
+          return wsConn.send(JSON.stringify(sysMsg));
+        }
+
+        // 2. Kiểm tra xem ĐỐI PHƯƠNG (to) có đang CHẶN mình (username) hay không
+        const amIBlockedByThem = db.prepare('SELECT 1 FROM blocks WHERE blocker = ? AND blocked = ?').get(to, username);
+        if (amIBlockedByThem) {
+          // Người bị chặn gửi tin: Server NUỐT TIN (không lưu DB), gửi cảnh báo hệ thống cục bộ về máy người gửi
+          const localSysMsg = {
+            type: 'system',
+            text: `[ SYSTEM // ACCESS_DENIED: Bạn đã bị ${to.toUpperCase()} chặn kết nối ]`,
+            timestamp: new Date().toISOString()
+          };
+          return wsConn.send(JSON.stringify(localSysMsg));
+        }
+
+        // --- NẾU KHÔNG BỊ CHẶN -> CHẠY LOGIC GỬI TIN TIÊU CHUẨN ---
         const isReceiverOnline = onlineUsers.has(to);
         const deliveredValue = isReceiverOnline ? 1 : 0;
 
@@ -585,13 +625,13 @@ wss.on('connection', (wsConn, request, username) => {
 
         if (isReceiverOnline) {
           onlineUsers.get(to).forEach(c => {
-            if (c.readyState === ws.OPEN) c.send(payload);
+            if (c.readyState === 1) c.send(payload);
           });
         }
 
         if (onlineUsers.has(username)) {
           onlineUsers.get(username).forEach(c => {
-            if (c !== wsConn && c.readyState === ws.OPEN) {
+            if (c !== wsConn && c.readyState === 1) {
               c.send(JSON.stringify({ ...chatMsg, self: true }));
             }
           });
@@ -602,7 +642,7 @@ wss.on('connection', (wsConn, request, username) => {
         if (isReceiverOnline && onlineUsers.has(username)) {
           const deliveredReceipt = { type: 'delivered_receipt', messageId: chatMsg.id, to: username, from: to };
           onlineUsers.get(username).forEach(c => {
-            if (c.readyState === ws.OPEN) c.send(JSON.stringify(deliveredReceipt));
+            if (c.readyState === 1) c.send(JSON.stringify(deliveredReceipt));
           });
         }
         return;
