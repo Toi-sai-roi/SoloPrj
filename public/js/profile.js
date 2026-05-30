@@ -3,20 +3,18 @@
 // ==========================================
 
 // Hàm mở Modal Profile (Lớp 2)
+// THAY THẾ TOÀN BỘ HÀM openProfile TRONG FILE profile.js THÀNH BẢN VẬN HÀNH VERSION 5:
 async function openProfile(username) {
     let modal = document.getElementById('cyber-profile-modal');
     if (!modal) {
         modal = document.createElement('div');
         modal.id = 'cyber-profile-modal';
         modal.className = 'profile-modal-overlay';
-        // Đặt mức ưu tiên hiển thị cho Lớp 2
-        modal.style.zIndex = '99999'; 
+        modal.style.zIndex = '99999';
         document.body.appendChild(modal);
     }
 
     modal.style.display = 'flex';
-
-    // Hiển thị giao diện chờ tải dữ liệu
     modal.innerHTML = `
     <div class="profile-modal-card glass-panel" style="text-align:center;">
       <div class="profile-modal-title">LOADING_DATA...</div>
@@ -24,22 +22,51 @@ async function openProfile(username) {
   `;
 
     try {
-        // Gọi API lấy dữ liệu chi tiết của User cần xem
+        // 1. Tải thông tin Profile cơ bản
         const response = await fetch(`/api/profile/${username}`, {
             headers: { 'Authorization': `Bearer ${AppState.token}` }
         });
-
         if (!response.ok) throw new Error('Không thể tải profile mạng lưới');
         const profileData = await response.json();
 
-        // Kiểm tra xem User đang xem có phải là chính mình không để bật chế độ chỉnh sửa (Edit)
+        // 2. Tải trạng thái quan hệ giữa 2 người
+        const relResponse = await fetch(`/api/friends/status/${username}`, {
+            headers: { 'Authorization': `Bearer ${AppState.token}` }
+        });
+        const relData = await relResponse.json();
+
         const isMe = (username === AppState.currentUser);
 
-        // CHÍ MẠNG LỚP 3: Gọi hàm mở Lightbox nội bộ đè trực tiếp lên Modal, chặn nổi bọt tuyệt đối
         const avatarHtml = profileData.avatar
             ? `<img src="${profileData.avatar}" id="profile-avatar-img" onclick="openInternalLightbox(event, this.src)" style="width:100%; height:100%; border-radius:4px; object-fit:cover; cursor:pointer;">`
             : `<div id="profile-avatar-placeholder" style="font-size:42px; font-family:var(--font-tech);">${username.charAt(0).toUpperCase()}</div>`;
-        
+
+        // 3. Xử lý logic sinh Nút bấm tương tác dựa trên trạng thái quan hệ
+        let actionButtonsHtml = '';
+        if (!isMe) {
+            if (relData.relation === 'none') {
+                actionButtonsHtml = `<button class="cyber-btn" onclick="handleFriendAction('${username}', 'request')" style="width:70%; border-color:var(--neon-cyan); color:var(--neon-cyan);">[ CONNECT_NODE ]</button>`;
+            } else if (relData.relation === 'pending' && relData.sender === 'me') {
+                actionButtonsHtml = `<button class="cyber-btn" onclick="handleFriendAction('${username}', 'cancel')" style="width:70%; border-color:var(--text-muted); color:var(--text-muted);">[ PENDING_CANCEL ]</button>`;
+            } else if (relData.relation === 'pending' && relData.sender === 'them') {
+                actionButtonsHtml = `
+                    <div style="display:flex; gap:10px; width:70%;">
+                        <button class="cyber-btn" onclick="handleFriendAction('${username}', 'request')" style="flex:1; border-color:var(--neon-green); color:var(--neon-green);">[ ACCEPT ]</button>
+                        <button class="cyber-btn" onclick="handleFriendAction('${username}', 'cancel')" style="flex:1; border-color:var(--neon-pink); color:var(--neon-pink);">[ DECLINE ]</button>
+                    </div>
+                `;
+            } else if (relData.relation === 'friends') {
+                actionButtonsHtml = `<button class="cyber-btn" onclick="handleFriendAction('${username}', 'cancel')" style="width:70%; border-color:var(--neon-purple); color:var(--neon-purple);">[ DISCONNECT_NODE ]</button>`;
+            } else if (relData.relation === 'blocking') {
+                actionButtonsHtml = `<div style="color:var(--neon-pink); font-family:var(--font-tech); margin-top:10px;">[ NODE_BLOCKED_BY_YOU ]</div>`;
+            }
+
+            // Luôn thêm nút Block màu đỏ trừ khi chính mình tự chặn mình
+            if (relData.relation !== 'blocking') {
+                actionButtonsHtml += `<button class="cyber-btn" onclick="handleBlockAction('${username}')" style="width:25%; border-color:var(--neon-pink); color:var(--neon-pink); margin-left:5%;">[ BLOCK ]</button>`;
+            }
+        }
+
         modal.innerHTML = `
       <div class="profile-modal-card glass-panel">
         <div class="profile-modal-header">
@@ -67,15 +94,19 @@ async function openProfile(username) {
             </div>
             
             <div class="profile-field">
-              <label>BIOGRAPHY (TIỂU SỬ - TỐI ĐA 100 KÝ TỰ)</label>
+              <label>BIOGRAPHY</label>
               ${isMe ? `
-                <textarea id="profile-bio-input" class="cyber-input" style="resize:none; height:70px; font-family:var(--font-body);" placeholder="Nhập tiểu sử mạng lưới của bạn..." maxlength="100">${profileData.bio || ''}</textarea>
+                <textarea id="profile-bio-input" class="cyber-input" style="resize:none; height:70px; font-family:var(--font-body);" placeholder="Nhập tiểu sử..." maxlength="100">${profileData.bio || ''}</textarea>
               ` : `
                 <div class="cyber-input" style="height:auto; min-height:50px; background:rgba(0,0,0,0.2); font-family:var(--font-body); white-space:pre-wrap;">${profileData.bio || 'Chưa cấu hình tiểu sử...'}</div>
               `}
             </div>
 
-            <div class="profile-field" style="margin-top: 5px; font-family:var(--font-tech); font-size:11px; color:var(--text-muted); display:flex; justify-content:space-between;">
+            <div class="profile-field" style="margin-top:15px; display:flex; justify-content:flex-start;">
+                ${actionButtonsHtml}
+            </div>
+
+            <div class="profile-field" style="margin-top:15px; font-family:var(--font-tech); font-size:11px; color:var(--text-muted); display:flex; justify-content:space-between;">
               <span>📅 JOINED: ${new Date(profileData.created_at).toLocaleDateString('vi-VN')}</span>
               <span style="color:var(--neon-green)">● ONLINE</span>
             </div>
@@ -92,6 +123,54 @@ async function openProfile(username) {
         console.error('Lỗi mở profile:', err);
         alert('Không thể kết xuất dữ liệu profile.');
         closeProfileModal();
+    }
+}
+
+// Hàm xử lý tương tác Kết bạn / Hủy bạn
+async function handleFriendAction(targetUser, actionType) {
+    const url = actionType === 'request' ? '/api/friends/request' : '/api/friends/cancel';
+    const method = actionType === 'request' ? 'POST' : 'DELETE';
+    const bodyData = actionType === 'request' ? { receiver: targetUser } : { target: targetUser };
+
+    try {
+        const response = await fetch(url, {
+            method: method,
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${AppState.token}`
+            },
+            body: JSON.stringify(bodyData)
+        });
+        const resData = await response.json();
+        alert(resData.message || 'Thao tác liên kết thành công');
+
+        // Refresh lại chính modal để cập nhật trạng thái nút bấm mới ngay lập tức
+        openProfile(targetUser);
+        if (typeof loadUsers === 'function') loadUsers();
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+// Hàm xử lý chặn (Block)
+async function handleBlockAction(targetUser) {
+    if (!confirm(`Bạn có chắc chắn muốn ngắt kết nối mạng lưới và chặn Node [${targetUser.toUpperCase()}] không?`)) return;
+
+    try {
+        const response = await fetch('/api/block', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${AppState.token}`
+            },
+            body: JSON.stringify({ target: targetUser })
+        });
+        const resData = await response.json();
+        alert(resData.message);
+        closeProfileModal();
+        if (typeof loadUsers === 'function') loadUsers();
+    } catch (e) {
+        console.error(e);
     }
 }
 
@@ -126,9 +205,9 @@ function openInternalLightbox(event, src) {
             align-items: center; 
             cursor: zoom-out;
         `;
-        
+
         // Khi click vào vùng đen thì TẮT LỚP 3, giữ nguyên Lớp 2, không động chạm gì vào Home
-        internalOverlay.onclick = function(e) {
+        internalOverlay.onclick = function (e) {
             internalOverlay.style.display = 'none';
         };
 
@@ -143,9 +222,9 @@ function openInternalLightbox(event, src) {
     if (img) {
         img.src = src;
         // Chặn nổi bọt khi click trúng bức ảnh phóng to
-        img.onclick = function(e) { e.stopPropagation(); };
+        img.onclick = function (e) { e.stopPropagation(); };
     }
-    
+
     internalOverlay.style.display = 'flex';
 }
 

@@ -40,7 +40,7 @@ db.exec(`
     FOREIGN KEY (sender)   REFERENCES users(username),
     FOREIGN KEY (receiver) REFERENCES users(username)
   );
-
+  
   CREATE TABLE IF NOT EXISTS reactions (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     message_id INTEGER NOT NULL,
@@ -50,6 +50,27 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
     FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE
+  ); 
+
+  CREATE TABLE IF NOT EXISTS friends (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_one    TEXT NOT NULL,
+    user_two    TEXT NOT NULL,
+    status      TEXT DEFAULT 'pending', -- 'pending' (chờ), 'accepted' (bạn bè)
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_one) REFERENCES users(username),
+    FOREIGN KEY (user_two) REFERENCES users(username),
+    UNIQUE(user_one, user_two) -- Tránh trùng lặp quan hệ chéo
+  );
+
+  CREATE TABLE IF NOT EXISTS blocks (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    blocker     TEXT NOT NULL,
+    blocked     TEXT NOT NULL,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (blocker) REFERENCES users(username),
+    FOREIGN KEY (blocked) REFERENCES users(username),
+    UNIQUE(blocker, blocked)
   );
 `);
 
@@ -184,7 +205,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // FIX CHUẨN #1: Lấy danh sách users có kèm trường AVATAR để hiển thị ra danh sách chat lề trái
+  // Lấy danh sách users có kèm trường AVATAR để hiển thị ra danh sách chat lề trái
   if (pathname === '/api/users' && req.method === 'GET') {
     const payload = authenticateToken(req);
     if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
@@ -201,7 +222,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // FIX CHUẨN #2: Đồng bộ API Profile khớp với endpoint gọi từ Client
+  // Đồng bộ API Profile khớp với endpoint gọi từ Client
   if (pathname.startsWith('/api/profile/') && req.method === 'GET') {
     const payload = authenticateToken(req);
     if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
@@ -252,6 +273,113 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, { success: true });
     } catch (err) {
       return sendJSON(res, 500, { error: 'Lỗi hệ thống khi cập nhật profile' });
+    }
+  }
+
+  // =========================================================================
+  // API VERSION 5: FRIENDS & BLOCKS CONTROLLER (HTTP PURE NODE.JS)
+  // =========================================================================
+
+  // 1. POST /api/friends/request — Gửi lời mời kết bạn hoặc chấp nhận chéo
+  if (pathname === '/api/friends/request' && req.method === 'POST') {
+    const payload = authenticateToken(req);
+    if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
+
+    try {
+      const { receiver } = await getPostBody(req);
+      const sender = payload.username;
+
+      if (!receiver || sender === receiver) return sendJSON(res, 400, { error: 'Dữ liệu không hợp lệ' });
+
+      const isBlocked = db.prepare('SELECT 1 FROM blocks WHERE (blocker=? AND blocked=?) OR (blocker=? AND blocked=?)').get(sender, receiver, receiver, sender);
+      if (isBlocked) return sendJSON(res, 403, { error: 'NODE_BLOCKED: Giao tiếp bị chặn' });
+
+      const u1 = sender < receiver ? sender : receiver;
+      const u2 = sender < receiver ? receiver : sender;
+
+      const existing = db.prepare('SELECT * FROM friends WHERE user_one = ? AND user_two = ?').get(u1, u2);
+
+      if (!existing) {
+        db.prepare('INSERT INTO friends (user_one, user_two, status) VALUES (?, ?, "pending")').run(u1, u2);
+        broadcastToUser(receiver, { type: 'friend_request', from: sender });
+        return sendJSON(res, 200, { status: 'pending', message: 'Đã gửi yêu cầu kết nối Node' });
+      } else if (existing.status === 'pending') {
+        const originalSender = (existing.user_one === u1 && !db.prepare('SELECT 1 FROM friends WHERE user_one=? AND status="pending"').get(sender)) ? u2 : u1;
+        if (originalSender !== sender) {
+          db.prepare('UPDATE friends SET status = "accepted" WHERE user_one = ? AND user_two = ?').run(u1, u2);
+          broadcastToUser(receiver, { type: 'friend_accepted', from: sender });
+          return sendJSON(res, 200, { status: 'accepted', message: 'Đã thiết lập liên kết bạn bè thành công' });
+        }
+        return sendJSON(res, 200, { status: 'pending', message: 'Yêu cầu đang trong trạng thái chờ xử lý' });
+      } else {
+        return sendJSON(res, 200, { status: 'accepted', message: 'Hai Node đã liên kết từ trước' });
+      }
+    } catch (err) {
+      return sendJSON(res, 500, { error: 'Lỗi máy chủ' });
+    }
+  }
+
+  // 2. GET /api/friends/status/:username — Lấy trạng thái quan hệ
+  if (pathname.startsWith('/api/friends/status/') && req.method === 'GET') {
+    const payload = authenticateToken(req);
+    if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
+
+    const target = decodeURIComponent(pathname.split('/').pop());
+    const me = payload.username;
+
+    const isBlockedMe = db.prepare('SELECT 1 FROM blocks WHERE blocker=? AND blocked=?').get(me, target);
+    if (isBlockedMe) return sendJSON(res, 200, { relation: 'blocking' });
+
+    const isBlockedByTarget = db.prepare('SELECT 1 FROM blocks WHERE blocker=? AND blocked=?').get(target, me);
+    if (isBlockedByTarget) return sendJSON(res, 200, { relation: 'blocked_by' });
+
+    const u1 = me < target ? me : target;
+    const u2 = me < target ? target : me;
+    const row = db.prepare('SELECT * FROM friends WHERE user_one = ? AND user_two = ?').get(u1, u2);
+
+    if (!row) return sendJSON(res, 200, { relation: 'none' });
+    if (row.status === 'accepted') return sendJSON(res, 200, { relation: 'friends' });
+
+    return sendJSON(res, 200, { relation: 'pending', sender: row.user_one === me ? 'me' : 'them' });
+  }
+
+  // 3. DELETE /api/friends/cancel — Từ chối hoặc hủy kết bạn
+  if (pathname === '/api/friends/cancel' && req.method === 'DELETE') {
+    const payload = authenticateToken(req);
+    if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
+
+    try {
+      const { target } = await getPostBody(req);
+      const me = payload.username;
+      const u1 = me < target ? me : target;
+      const u2 = me < target ? target : me;
+
+      db.prepare('DELETE FROM friends WHERE user_one = ? AND user_two = ?').run(u1, u2);
+      return sendJSON(res, 200, { success: true, message: 'Đã hủy kết nối mạng lưới' });
+    } catch (err) {
+      return sendJSON(res, 500, { error: 'Lỗi xử lý hệ thống' });
+    }
+  }
+
+  // 4. POST /api/block — Chặn người dùng
+  if (pathname === '/api/block' && req.method === 'POST') {
+    const payload = authenticateToken(req);
+    if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
+
+    try {
+      const { target } = await getPostBody(req);
+      const blocker = payload.username;
+
+      if (!target || blocker === target) return sendJSON(res, 400, { error: 'Thao tác không hợp lệ' });
+
+      db.prepare('INSERT OR IGNORE INTO blocks (blocker, blocked) VALUES (?, ?)').run(blocker, target);
+      const u1 = blocker < target ? blocker : target;
+      const u2 = blocker < target ? target : blocker;
+      db.prepare('DELETE FROM friends WHERE user_one = ? AND user_two = ?').run(u1, u2);
+
+      return sendJSON(res, 200, { success: true, message: 'Đã chặn liên lạc hoàn toàn với Node này' });
+    } catch (err) {
+      return sendJSON(res, 500, { error: 'Lỗi hệ thống khi block' });
     }
   }
 
@@ -502,6 +630,18 @@ wss.on('connection', (wsConn, request, username) => {
   wsConn.on('error', (err) => console.error(`[WS Error] ${username}:`, err.message));
 });
 
+
+// 5. Hàm tiện ích để gửi thông điệp đến một user cụ thể (dùng trong block/friend request)
+function broadcastToUser(targetUsername, payload) {
+  if (onlineUsers.has(targetUsername)) {
+    const stringData = JSON.stringify(payload);
+    onlineUsers.get(targetUsername).forEach(client => {
+      if (client.readyState === 1) { // 1 nghĩa là đang OPEN
+        client.send(stringData);
+      }
+    });
+  }
+}
 // ==========================================
 // START
 // ==========================================
