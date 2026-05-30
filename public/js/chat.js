@@ -95,6 +95,44 @@ function initWebSocket() {
           break;
         }
 
+        case 'network_update': {
+          // Data nhận về từ server mẫu: { type: 'network_update', sender: 'binh', action: 'add' }
+          const targetUser = data.sender;
+          const actionType = data.action; // 'add', 'accept', 'cancel'
+
+          // Tìm Node của đối phương trong bộ nhớ máy mình để cập nhật trạng thái hiển thị
+          const idx = AppState.usersData.findIndex(u => u.username === targetUser);
+
+          if (idx !== -1) {
+            console.log(`[WS NETWORK]: Nhận tín hiệu tương tác từ ${targetUser} -> Action: ${actionType}`);
+
+            // Phân loại logic để gán relation tương ứng cho máy người nhận:
+            if (actionType === 'add') {
+              // Đối phương gửi add mình -> trạng thái của mình đối với họ là "đang chờ nhận"
+              AppState.usersData[idx].relation = 'pending_received';
+            }
+            else if (actionType === 'accept') {
+              // Đối phương đồng ý -> chính thức thành bạn bè
+              AppState.usersData[idx].relation = 'friend';
+            }
+            else if (actionType === 'cancel') {
+              // Đối phương hủy lời mời / từ chối / unfriend -> đưa về mặc định
+              AppState.usersData[idx].relation = 'none';
+            }
+
+            // Gọi hàm render gốc tại users.js để cập nhật giao diện và tiếng chuông/nút bấm lập tức
+            if (typeof renderUsersList === 'function') {
+              renderUsersList();
+            }
+
+            // TÙY CHỌN: Hiệu ứng nhấp nháy đèn hoặc tạo âm thanh Cyberpunk báo hiệu có lời mời
+            if (actionType === 'add' && typeof glowNotification === 'function') {
+              glowNotification(targetUser);
+            }
+          }
+          break;
+        }
+
         case 'system': {
           // 1. Nếu là tin nhắn hệ thống thông báo bị đối phương chặn (ACCESS_DENIED)
           if (data.text.includes('ACCESS_DENIED')) {
@@ -646,3 +684,4 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
+

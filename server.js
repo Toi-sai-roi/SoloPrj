@@ -41,6 +41,16 @@ db.exec(`
     FOREIGN KEY (receiver) REFERENCES users(username)
   );
   
+  CREATE TABLE IF NOT EXISTS blocks (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    blocker     TEXT NOT NULL,
+    blocked     TEXT NOT NULL,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (blocker) REFERENCES users(username),
+    FOREIGN KEY (blocked) REFERENCES users(username),
+    UNIQUE(blocker, blocked)
+  );
+
   CREATE TABLE IF NOT EXISTS reactions (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     message_id INTEGER NOT NULL,
@@ -50,27 +60,18 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
     FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE
-  ); 
-
-  CREATE TABLE IF NOT EXISTS friends (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_one    TEXT NOT NULL,
-    user_two    TEXT NOT NULL,
-    status      TEXT DEFAULT 'pending',
-    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_one) REFERENCES users(username),
-    FOREIGN KEY (user_two) REFERENCES users(username),
-    UNIQUE(user_one, user_two)
   );
 
-  CREATE TABLE IF NOT EXISTS blocks (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    blocker     TEXT NOT NULL,
-    blocked     TEXT NOT NULL,
-    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (blocker) REFERENCES users(username),
-    FOREIGN KEY (blocked) REFERENCES users(username),
-    UNIQUE(blocker, blocked)
+  CREATE TABLE IF NOT EXISTS friends (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_one   TEXT NOT NULL,
+    user_two   TEXT NOT NULL,
+    status     TEXT DEFAULT 'pending', -- 'pending' hoặc 'accepted'
+    sender     TEXT NOT NULL,          -- Lưu ai là người bấm nút gửi trước
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_one) REFERENCES users(username),
+    FOREIGN KEY (user_two) REFERENCES users(username),
+    UNIQUE(user_one, user_two)       
   );
 `);
 
@@ -151,12 +152,70 @@ function serveStatic(req, res) {
 // ==========================================
 // HTTP SERVER ROUTER
 // ==========================================
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const pathname = url.pathname;
 
   res.setHeader('Access-Control-Allow-Origin', '*');
 
+  // =========================================================================
+  // [V5 ĐẶT LÊN ĐẦU]: POST /api/users/friend-action - XỬ LÝ MẠNG LƯỚI KẾT BẠN
+  // =========================================================================
+  if (pathname === '/api/users/friend-action' && req.method === 'POST') {
+    const payload = authenticateToken(req);
+    if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
+
+    try {
+      const me = payload.username;
+      const { targetUser, action } = await getPostBody(req);
+
+      if (!targetUser || me === targetUser) {
+        return sendJSON(res, 400, { error: 'Yêu cầu không hợp lệ' });
+      }
+
+      const u1 = me < targetUser ? me : targetUser;
+      const u2 = me < targetUser ? targetUser : me;
+
+      updateLastSeen(me);
+
+      if (action === 'add') {
+        db.prepare(`
+          INSERT INTO friends (user_one, user_two, status, sender)
+          VALUES (?, ?, 'pending', ?)
+          ON CONFLICT(user_one, user_two) DO UPDATE SET status='pending', sender=?
+        `).run(u1, u2, me, me);
+
+        sendNetworkWS(targetUser, { type: 'network_update', sender: me, action: 'add' });
+        return sendJSON(res, 200, { success: true, data: { relation: 'pending_sent' } });
+      }
+
+      if (action === 'accept') {
+        db.prepare(`
+          UPDATE friends SET status = 'accepted' WHERE user_one = ? AND user_two = ?
+        `).run(u1, u2);
+
+        sendNetworkWS(targetUser, { type: 'network_update', sender: me, action: 'accept' });
+        return sendJSON(res, 200, { success: true, data: { relation: 'friend' } });
+      }
+
+      if (action === 'cancel') {
+        db.prepare(`
+          DELETE FROM friends WHERE user_one = ? AND user_two = ?
+        `).run(u1, u2);
+
+        sendNetworkWS(targetUser, { type: 'network_update', sender: me, action: 'cancel' });
+        return sendJSON(res, 200, { success: true, data: { relation: 'none' } });
+      }
+
+      return sendJSON(res, 400, { error: 'Hành động mạng lưới không hợp lệ' });
+    } catch (err) {
+      console.error('❌ Lỗi xử lý Router API friend-action:', err.message);
+      return sendJSON(res, 500, { error: 'Lỗi máy chủ hệ thống mạng lưới' });
+    }
+  }
+
+  // POST /api/register
   if (pathname === '/api/register' && req.method === 'POST') {
     try {
       const { username, password } = await getPostBody(req);
@@ -174,6 +233,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  // POST /api/login
   if (pathname === '/api/login' && req.method === 'POST') {
     try {
       const { username, password } = await getPostBody(req);
@@ -190,25 +250,47 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // Lấy danh sách users - Ép Offline khi dính block hai chiều độc lập
+  // Lấy danh sách users - Kèm mối quan hệ kết bạn và Ép Offline nếu bị block
   if (pathname === '/api/users' && req.method === 'GET') {
     const payload = authenticateToken(req);
     if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
+
     try {
       const me = payload.username;
       const allUsers = db.prepare('SELECT username, avatar FROM users WHERE username != ? ORDER BY username ASC').all(me);
 
       const usersList = allUsers.map(u => {
         const hasBlock = db.prepare('SELECT 1 FROM blocks WHERE (blocker=? AND blocked=?) OR (blocker=? AND blocked=?)').get([me, u.username, u.username, me]);
+        
+        const u1 = me < u.username ? me : u.username;
+        const u2 = me < u.username ? u.username : me;
+        const friendship = db.prepare('SELECT status, sender FROM friends WHERE user_one = ? AND user_two = ?').get(u1, u2);
+        
+        let relation = 'none';
+        if (friendship) {
+          if (friendship.status === 'accepted') {
+            relation = 'friend';
+          } else if (friendship.status === 'pending') {
+            if (friendship.sender === me) {
+              relation = 'pending_sent';
+            } else {
+              relation = 'pending_received';
+            }
+          }
+        }
+
         return {
           username: u.username,
           avatar: u.avatar,
-          online: hasBlock ? false : onlineUsers.has(u.username)
+          online: hasBlock ? false : onlineUsers.has(u.username),
+          relation: relation
         };
       });
+
       return sendJSON(res, 200, usersList);
     } catch (err) {
-      return sendJSON(res, 500, { error: 'Không thể lấy danh sách user' });
+      console.error('❌ Lỗi hệ thống tại API /api/users:', err.message);
+      return sendJSON(res, 500, { error: 'Không thể tải cấu trúc mạng lưới người dùng' });
     }
   }
 
@@ -243,6 +325,7 @@ const server = http.createServer(async (req, res) => {
     return sendJSON(res, 200, { ...user, lastSeenText, isBlockedReal: !!hasBlock });
   }
 
+  // PUT /api/profile - Cập nhật avatar + bio
   if (pathname === '/api/profile' && req.method === 'PUT') {
     const payload = authenticateToken(req);
     if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
@@ -257,7 +340,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // Gửi yêu cầu kết bạn
+  // Gửi yêu cầu kết bạn (Endpoint dự phòng cũ)
   if (pathname === '/api/friends/request' && req.method === 'POST') {
     const payload = authenticateToken(req);
     if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
@@ -342,14 +425,11 @@ const server = http.createServer(async (req, res) => {
       if (!target || blocker === target) return sendJSON(res, 400, { error: 'Dữ liệu không hợp lệ' });
 
       db.prepare('INSERT OR IGNORE INTO blocks (blocker, blocked) VALUES (?, ?)').run(blocker, target);
-      // Khi chặn thì đồng thời xóa luôn quan hệ kết bạn nếu có
       const u1 = blocker < target ? blocker : target;
       const u2 = blocker < target ? target : blocker;
       db.prepare('DELETE FROM friends WHERE user_one = ? AND user_two = ?').run(u1, u2);
 
-      // Bắn tin cập nhật ép offline tức thì về Client
       broadcastStatusChangeToPair(blocker, target);
-
       return sendJSON(res, 200, { success: true, message: `Mạng lưới đã cách ly nút ${target.toUpperCase()}` });
     } catch (err) {
       return sendJSON(res, 500, { error: 'Lỗi xử lý block' });
@@ -374,6 +454,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  // Static file server ở cuối cùng
   if (req.method === 'GET') return serveStatic(req, res);
   sendJSON(res, 404, { error: 'Không tìm thấy' });
 });
@@ -428,6 +509,27 @@ function broadcastSystemMessage(text) {
   }
 }
 
+function broadcastToUser(targetUsername, payload) {
+  if (onlineUsers.has(targetUsername)) {
+    const stringData = JSON.stringify(payload);
+    onlineUsers.get(targetUsername).forEach(client => {
+      if (client.readyState === ws.OPEN) client.send(stringData);
+    });
+  }
+}
+
+// Hàm helper chuyển tiếp tín hiệu kết bạn qua WebSocket toàn cục
+function sendNetworkWS(targetUsername, payloadObj) {
+  if (onlineUsers.has(targetUsername)) {
+    const payloadStr = JSON.stringify(payloadObj);
+    onlineUsers.get(targetUsername).forEach(c => {
+      if (c.readyState === ws.OPEN) {
+        c.send(payloadStr);
+      }
+    });
+  }
+}
+
 wss.on('connection', (wsConn, request, username) => {
   console.log(`[WS] ${username} connected`);
   updateLastSeen(username);
@@ -458,7 +560,7 @@ wss.on('connection', (wsConn, request, username) => {
         const { to, isTyping } = data;
         if (!to) return;
         const hasBlock = db.prepare('SELECT 1 FROM blocks WHERE (blocker=? AND blocked=?) OR (blocker=? AND blocked=?)').get([username, to, to, username]);
-        if (hasBlock) return; // Nếu block, nuốt sự kiện đang gõ chữ
+        if (hasBlock) return; 
 
         const typingMsg = { type: 'typing', sender: username, isTyping };
         if (onlineUsers.has(to)) {
@@ -467,7 +569,6 @@ wss.on('connection', (wsConn, request, username) => {
         return;
       }
 
-      // get_history - FIX cú pháp mảng truyền vào câu lệnh SQLite (.get)
       if (data.type === 'get_history') {
         const { with: withUser } = data;
         if (!withUser) return;
@@ -495,13 +596,11 @@ wss.on('connection', (wsConn, request, username) => {
         if (!to || !text?.trim()) return;
         const cleanText = text.trim();
 
-        // Kiểm tra xem chính chủ có đang chặn người ta không
         const amIBlocking = db.prepare('SELECT 1 FROM blocks WHERE blocker = ? AND blocked = ?').get([username, to]);
         if (amIBlocking) {
           return wsConn.send(JSON.stringify({ type: 'system', text: `[ SYSTEM // THAO TÁC BỊ TỪ CHỐI: Bạn phải bỏ chặn đối phương để gửi tin nhắn ]` }));
         }
 
-        // Kiểm tra đối phương chặn mình không
         const amIBlockedByThem = db.prepare('SELECT 1 FROM blocks WHERE blocker = ? AND blocked = ?').get([to, username]);
         if (amIBlockedByThem) {
           return wsConn.send(JSON.stringify({ type: 'system', text: `[ SYSTEM // ACCESS_DENIED: Bạn đã bị ${to.toUpperCase()} chặn kết nối ]` }));
@@ -538,15 +637,9 @@ wss.on('connection', (wsConn, request, username) => {
   });
 });
 
-function broadcastToUser(targetUsername, payload) {
-  if (onlineUsers.has(targetUsername)) {
-    const stringData = JSON.stringify(payload);
-    onlineUsers.get(targetUsername).forEach(client => {
-      if (client.readyState === ws.OPEN) client.send(stringData);
-    });
-  }
-}
-
+// ==========================================
+// START
+// ==========================================
 server.listen(PORT, () => {
   console.log(`====================================================`);
   console.log(`🤖 CYBERPUNK SERVER RE-ENGINEERED SUCCESSFUL`);

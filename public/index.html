@@ -59,20 +59,32 @@
       </div>
     </header>
     <div class="main-layout">
+      <!-- SCREEN 2: HOME -->
       <div class="users-panel glass-panel">
         <div class="panel-title">
           <span>ACTIVE COGNITIVE NODES</span>
           <span style="font-size: 11px; color: var(--neon-cyan);" id="users-count">0 NODES</span>
         </div>
+
+        <!-- 🔥 THANH CHUYỂN TAB CHUẨN CYBERPUNK (KHÔNG PHÁ LAYOUT V4) -->
+        <div class="auth-tabs"
+          style="margin-bottom: 12px; display: flex; gap: 2px; border-bottom: 1px solid rgba(255,255,255,0.05);">
+          <button id="tab-users-all" class="auth-tab active"
+            style="flex: 1; padding: 8px; font-size: 10px; font-family: var(--font-tech); letter-spacing: 1px;"
+            onclick="switchUsersTab('all')">ALL NODES</button>
+          <button id="tab-users-friends" class="auth-tab"
+            style="flex: 1; padding: 8px; font-size: 10px; font-family: var(--font-tech); letter-spacing: 1px;"
+            onclick="switchUsersTab('friends')">FRIENDS</button>
+        </div>
+
         <div class="search-container">
           <input type="text" id="search-input" class="cyber-input"
-            placeholder="Lọc danh sách người dùng trong sector..." oninput="filterUsers()">
+            placeholder="Lọc danh sách người dùng trong sector...">
         </div>
         <div id="users-list-container" class="users-list"></div>
         <div id="users-blank-state" class="blank-state" style="display: none;">
           <div style="font-size: 40px;">🛸</div>
-          <div>NO NEURAL NODES DETECTED IN THIS SECTOR</div>
-          <div style="font-size: 10px; color: var(--text-muted);">Đợi những người dùng khác đăng ký tài khoản...</div>
+          <div id="blank-state-text">NO NEURAL NODES DETECTED IN THIS SECTOR</div>
         </div>
       </div>
     </div>
