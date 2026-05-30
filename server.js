@@ -1,20 +1,20 @@
-const http    = require('http');
-const fs      = require('fs');
-const path    = require('path');
-const crypto  = require('crypto');
-const ws      = require('ws');
-const jwt     = require('jsonwebtoken');
-const Database = require('better-sqlite3'); // FIX #1: đã đổi từ node:sqlite sang better-sqlite3
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const ws = require('ws');
+const jwt = require('jsonwebtoken');
+const Database = require('better-sqlite3');
 
 // ==========================================
 // CONFIG
 // ==========================================
-const PORT       = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'cyberpunk-neon-glow-secret-2026';
-const DB_PATH    = path.join(__dirname, 'chat.db');
+const DB_PATH = path.join(__dirname, 'chat.db');
 
 // ==========================================
-// DATABASE
+// DATABASE (Đã tích hợp sẵn cột Avatar, Bio, Last_seen)
 // ==========================================
 const db = new Database(DB_PATH);
 
@@ -23,6 +23,9 @@ db.exec(`
     username      TEXT PRIMARY KEY,
     password_hash TEXT NOT NULL,
     salt          TEXT NOT NULL,
+    avatar        TEXT DEFAULT '',
+    bio           TEXT DEFAULT '',
+    last_seen     DATETIME DEFAULT CURRENT_TIMESTAMP,
     created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -43,26 +46,29 @@ db.exec(`
     message_id INTEGER NOT NULL,
     username   TEXT NOT NULL,
     emoji      TEXT NOT NULL,
-    count      INTEGER DEFAULT 1, -- Lưu số lần user đó spam emoji này
+    count      INTEGER DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
     FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE
   );
 `);
 
-console.log('✅ SQLite database:', DB_PATH);
+console.log('✅ SQLite database initialized:', DB_PATH);
 
 // ==========================================
-// DATABASE HELPER FUNCTIONS (thêm vào đây)
+// DATABASE HELPER FUNCTIONS
 // ==========================================
-// FIX #2: Xóa bỏ markMessagesDelivered - không cần dùng nữa
 function markMessagesRead(sender, receiver) {
   db.prepare(`UPDATE messages SET read_at = CURRENT_TIMESTAMP WHERE sender = ? AND receiver = ? AND read_at IS NULL`).run(sender, receiver);
 }
 
+// Cập nhật last_seen mỗi khi user tương tác mạng lưới
+function updateLastSeen(username) {
+  db.prepare(`UPDATE users SET last_seen = CURRENT_TIMESTAMP WHERE username = ?`).run(username);
+}
+
 // ==========================================
 // ONLINE USERS MAP
-// key: username, value: Set<WebSocket>
 // ==========================================
 const onlineUsers = new Map();
 
@@ -107,23 +113,21 @@ function authenticateToken(req) {
 // ==========================================
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
-  '.css':  'text/css',
-  '.js':   'application/javascript',
-  '.png':  'image/png',
-  '.jpg':  'image/jpeg',
-  '.svg':  'image/svg+xml',
-  '.ico':  'image/x-icon',
+  '.css': 'text/css',
+  '.js': 'application/javascript',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
 };
 
 function serveStatic(req, res) {
-  // Default sang index.html cho mọi route không phải file
   let filePath = path.join(__dirname, 'public', req.url === '/' ? 'index.html' : req.url);
   const ext = path.extname(filePath);
   const mime = MIME_TYPES[ext] || 'text/plain';
 
   fs.readFile(filePath, (err, content) => {
     if (err) {
-      // Fallback về index.html nếu file không tồn tại (SPA routing)
       fs.readFile(path.join(__dirname, 'public', 'index.html'), (err2, indexContent) => {
         if (err2) { res.writeHead(500); res.end('Server error'); return; }
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -143,10 +147,7 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const pathname = url.pathname;
 
-  // CORS headers (optional, hữu ích khi dev local)
   res.setHeader('Access-Control-Allow-Origin', '*');
-
-  // --- API ROUTES ---
 
   // POST /api/register
   if (pathname === '/api/register' && req.method === 'POST') {
@@ -174,6 +175,8 @@ const server = http.createServer(async (req, res) => {
       const clean = username.trim().toLowerCase();
       const user = db.prepare('SELECT * FROM users WHERE username = ?').get(clean);
       if (!user || hashPassword(password, user.salt) !== user.password_hash) return sendJSON(res, 400, { error: 'Tài khoản hoặc mật khẩu không chính xác' });
+
+      updateLastSeen(clean); // Cập nhật thời gian online khi đăng nhập
       const token = jwt.sign({ username: clean }, JWT_SECRET, { expiresIn: '7d' });
       return sendJSON(res, 200, { success: true, token, username: clean });
     } catch (err) {
@@ -181,20 +184,77 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // GET /api/users
+  // FIX CHUẨN #1: Lấy danh sách users có kèm trường AVATAR để hiển thị ra danh sách chat lề trái
   if (pathname === '/api/users' && req.method === 'GET') {
     const payload = authenticateToken(req);
     if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
     try {
-      const allUsers = db.prepare('SELECT username FROM users ORDER BY username ASC').all();
-      const usersList = allUsers.map(u => ({ username: u.username, online: onlineUsers.has(u.username) }));
+      const allUsers = db.prepare('SELECT username, avatar FROM users ORDER BY username ASC').all();
+      const usersList = allUsers.map(u => ({
+        username: u.username,
+        avatar: u.avatar,
+        online: onlineUsers.has(u.username)
+      }));
       return sendJSON(res, 200, usersList);
     } catch (err) {
       return sendJSON(res, 500, { error: 'Không thể lấy danh sách user' });
     }
   }
 
-  // Serve static files (HTML, CSS, JS, assets)
+  // FIX CHUẨN #2: Đồng bộ API Profile khớp với endpoint gọi từ Client
+  if (pathname.startsWith('/api/profile/') && req.method === 'GET') {
+    const payload = authenticateToken(req);
+    if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
+
+    // THÊM decodeURIComponent VÀO ĐÂY:
+    const rawUsername = pathname.split('/').pop();
+    if (!rawUsername) return sendJSON(res, 400, { error: 'Missing username' });
+    const username = decodeURIComponent(rawUsername);
+
+    const user = db.prepare(`
+    SELECT username, avatar, bio, last_seen, created_at 
+    FROM users WHERE username = ?
+  `).get(username);
+
+    if (!user) return sendJSON(res, 404, { error: 'User not found' });
+
+    // Thuật toán tính toán chuỗi hiển thị thời gian hoạt động động
+    const lastSeen = new Date(user.last_seen);
+    const now = new Date();
+    const diffMinutes = Math.floor((now - lastSeen) / 60000);
+    let lastSeenText = '';
+
+    if (onlineUsers.has(username)) lastSeenText = 'Đang hoạt động';
+    else if (diffMinutes < 1) lastSeenText = 'Vừa hoạt động';
+    else if (diffMinutes < 60) lastSeenText = `${diffMinutes} phút trước`;
+    else if (diffMinutes < 1440) lastSeenText = `${Math.floor(diffMinutes / 60)} giờ trước`;
+    else lastSeenText = `${new Date(user.last_seen).toLocaleDateString('vi-VN')}`;
+
+    return sendJSON(res, 200, { ...user, lastSeenText });
+  }
+
+  // PUT /api/profile - Cập nhật avatar + bio tiểu sử cá nhân
+  if (pathname === '/api/profile' && req.method === 'PUT') {
+    const payload = authenticateToken(req);
+    if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
+
+    try {
+      const { avatar, bio } = await getPostBody(req);
+      updateLastSeen(payload.username);
+
+      if (avatar !== undefined) {
+        db.prepare('UPDATE users SET avatar = ? WHERE username = ?').run(avatar, payload.username);
+      }
+      if (bio !== undefined) {
+        const cleanBio = bio.trim().slice(0, 100);
+        db.prepare('UPDATE users SET bio = ? WHERE username = ?').run(cleanBio, payload.username);
+      }
+      return sendJSON(res, 200, { success: true });
+    } catch (err) {
+      return sendJSON(res, 500, { error: 'Lỗi hệ thống khi cập nhật profile' });
+    }
+  }
+
   if (req.method === 'GET') return serveStatic(req, res);
   sendJSON(res, 404, { error: 'Không tìm thấy' });
 });
@@ -219,7 +279,6 @@ server.on('upgrade', (request, socket, head) => {
   }
 });
 
-// Broadcast helpers
 function broadcastStatusChange(username, online) {
   const payload = JSON.stringify({ type: 'status_change', username, online });
   for (const connections of onlineUsers.values())
@@ -232,19 +291,17 @@ function broadcastSystemMessage(text) {
     connections.forEach(c => c.readyState === ws.OPEN && c.send(payload));
 }
 
-// Connection handler
 wss.on('connection', (wsConn, request, username) => {
   console.log(`[WS] ${username} connected`);
+  updateLastSeen(username);
 
-  // === FIX #4: HEARTBEAT (PING/PONG) ===
   let isAlive = true;
-  wsConn.on('pong', () => { isAlive = true; });
-  
+  wsConn.on('pong', () => { isAlive = true; updateLastSeen(username); });
+
   const pingInterval = setInterval(() => {
     if (!isAlive) {
       console.log(`[WS] ${username} heartbeat timeout, terminating`);
-      // Đã loại bỏ clearInterval ở đây, để sự kiện 'close' lo trọn gói
-      return wsConn.terminate(); 
+      return wsConn.terminate();
     }
     isAlive = false;
     wsConn.ping();
@@ -253,12 +310,10 @@ wss.on('connection', (wsConn, request, username) => {
   if (!onlineUsers.has(username)) onlineUsers.set(username, new Set());
   onlineUsers.get(username).add(wsConn);
 
-  // Gửi pending read receipts khi user online
   if (onlineUsers.get(username).size === 1) {
     broadcastStatusChange(username, true);
     broadcastSystemMessage(`${username} đã đăng nhập vào mạng lưới.`);
 
-    // Gửi read receipts cho tất cả tin nhắn chưa đọc
     const unreadMessages = db.prepare(`
       SELECT DISTINCT sender FROM messages 
       WHERE receiver = ? AND read_at IS NULL
@@ -277,8 +332,8 @@ wss.on('connection', (wsConn, request, username) => {
   wsConn.on('message', (messageStr) => {
     try {
       const data = JSON.parse(messageStr);
+      updateLastSeen(username); // Ghi nhận hành vi tương tác liên tục
 
-      // === TYPING INDICATOR ===
       if (data.type === 'typing') {
         const { to, isTyping } = data;
         if (!to) return;
@@ -291,7 +346,6 @@ wss.on('connection', (wsConn, request, username) => {
         return;
       }
 
-      // === GET HISTORY ===
       if (data.type === 'get_history') {
         const { with: withUser } = data;
         if (!withUser) return;
@@ -302,7 +356,6 @@ wss.on('connection', (wsConn, request, username) => {
             if (c.readyState === ws.OPEN) c.send(JSON.stringify(readReceipt));
           });
         }
-        // FIX #3: Truy vấn lịch sử tin nhắn với reactions trong 1 câu SQL duy nhất, tránh N+1 query
         const history = db.prepare(` 
           SELECT 
             m.id, m.sender, m.receiver, m.text, m.timestamp, m.delivered, m.read_at,
@@ -322,32 +375,26 @@ wss.on('connection', (wsConn, request, username) => {
         return;
       }
 
-      // === ADD REACTION ===
-      // Thay thế toàn bộ case 'add_reaction' trong server.js:
       if (data.type === 'add_reaction') {
         const { messageId, emoji } = data;
         if (!messageId || !emoji) return;
         try {
-          // Kiểm tra xem cặp (tin nhắn, user, emoji này) đã tồn tại chưa
           const existing = db.prepare(`
             SELECT id FROM reactions WHERE message_id = ? AND username = ? AND emoji = ?
           `).get(messageId, username, emoji);
 
           if (existing) {
-            // Nếu đã từng thả rồi: Cộng dồn số lượng lên và update thời gian mới nhất
             db.prepare(`
               UPDATE reactions SET count = count + 1, created_at = CURRENT_TIMESTAMP WHERE id = ?
             `).run(existing.id);
           } else {
-            // Nếu là emoji mới hoàn toàn của user này: Thêm dòng mới vào DB với count = 1
             db.prepare(`
               INSERT INTO reactions (message_id, username, emoji, count) VALUES (?, ?, ?, 1)
             `).run(messageId, username, emoji);
           }
-          
+
           const message = db.prepare('SELECT sender, receiver FROM messages WHERE id = ?').get(messageId);
           if (message) {
-            // Lấy tổng số lượng gộp của từng loại emoji cho tin nhắn này
             const allReactions = db.prepare(`
               SELECT emoji, SUM(count) as total_count, MAX(strftime('%s', created_at)) as max_ts 
               FROM reactions 
@@ -357,7 +404,7 @@ wss.on('connection', (wsConn, request, username) => {
 
             const reactionMap = {};
             const reactionTimestamps = {};
-            
+
             for (const r of allReactions) {
               reactionMap[r.emoji] = Number(r.total_count);
               reactionTimestamps[r.emoji] = parseInt(r.max_ts);
@@ -366,7 +413,7 @@ wss.on('connection', (wsConn, request, username) => {
             const reactionMsg = {
               type: 'reaction_update',
               messageId: messageId,
-              reactions: reactionMap, // Trả về dạng: {"❤️": 12, "😂": 5}
+              reactions: reactionMap,
               reactionTimestamps: reactionTimestamps
             };
             const payload = JSON.stringify(reactionMsg);
@@ -383,21 +430,19 @@ wss.on('connection', (wsConn, request, username) => {
         return;
       }
 
-      // === SEND MESSAGE ===
       if (data.type === 'send_message') {
         const { to, text } = data;
         if (!to || !text?.trim()) return;
         const cleanText = text.trim();
-        
-        // FIX #2: Kiểm tra online TRƯỚC khi INSERT, gán delivered đúng ngay từ đầu
+
         const isReceiverOnline = onlineUsers.has(to);
         const deliveredValue = isReceiverOnline ? 1 : 0;
-        
+
         const info = db.prepare(`
           INSERT INTO messages (sender, receiver, text, delivered) 
           VALUES (?, ?, ?, ?)
         `).run(username, to, cleanText, deliveredValue);
-        
+
         const chatMsg = {
           type: 'message',
           id: Number(info.lastInsertRowid),
@@ -409,15 +454,13 @@ wss.on('connection', (wsConn, request, username) => {
           read_at: null
         };
         const payload = JSON.stringify(chatMsg);
-        
-        // Gửi đến người nhận (nếu online)
+
         if (isReceiverOnline) {
           onlineUsers.get(to).forEach(c => {
             if (c.readyState === ws.OPEN) c.send(payload);
           });
         }
-        
-        // Đồng bộ tab khác của người gửi
+
         if (onlineUsers.has(username)) {
           onlineUsers.get(username).forEach(c => {
             if (c !== wsConn && c.readyState === ws.OPEN) {
@@ -425,11 +468,9 @@ wss.on('connection', (wsConn, request, username) => {
             }
           });
         }
-        
-        // Phản hồi tab hiện tại
+
         wsConn.send(JSON.stringify({ ...chatMsg, self: true }));
-        
-        // Gửi delivered receipt nếu receiver online (chỉ để báo UI)
+
         if (isReceiverOnline && onlineUsers.has(username)) {
           const deliveredReceipt = { type: 'delivered_receipt', messageId: chatMsg.id, to: username, from: to };
           onlineUsers.get(username).forEach(c => {
@@ -445,7 +486,8 @@ wss.on('connection', (wsConn, request, username) => {
 
   wsConn.on('close', () => {
     console.log(`[WS] ${username} disconnected`);
-    clearInterval(pingInterval); // Dọn dẹp duy nhất tại đây cho mọi trường hợp đóng kết nối
+    db.prepare(`UPDATE users SET last_seen = CURRENT_TIMESTAMP WHERE username = ?`).run(username);
+    clearInterval(pingInterval);
     const conns = onlineUsers.get(username);
     if (conns) {
       conns.delete(wsConn);
@@ -465,7 +507,7 @@ wss.on('connection', (wsConn, request, username) => {
 // ==========================================
 server.listen(PORT, () => {
   console.log(`====================================================`);
-  console.log(`🤖 CYBERPUNK CHAT SERVER RUNNING`);
+  console.log(`🤖 CYBERPUNK CHAT SERVER RUNNING WITH VERSION 4`);
   console.log(`🔗 http://localhost:${PORT}`);
   console.log(`====================================================`);
 });

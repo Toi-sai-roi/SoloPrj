@@ -15,8 +15,19 @@ const AppState = {
 // Khởi động app khi DOM sẵn sàng
 window.addEventListener('DOMContentLoaded', () => {
   if (AppState.token && AppState.currentUser) {
-    document.getElementById('current-user-display').textContent =
-      `USER // ${AppState.currentUser.toUpperCase()}`;
+    const userDisplay = document.getElementById('current-user-display');
+
+    // Gán text hiển thị
+    userDisplay.textContent = `USER // ${AppState.currentUser.toUpperCase()}`;
+
+    // THÊM DÒNG NÀY: Biến nút thành pointer và bắt sự kiện click mở profile
+    userDisplay.style.cursor = 'pointer';
+    userDisplay.addEventListener('click', () => {
+      // Ép hẳn về toLowerCase() trước khi truyền vào để bảo đảm an toàn tuyệt đối
+      const safeUsername = AppState.currentUser.toLowerCase();
+      openProfile(safeUsername);
+    });
+
     showScreen('home-screen');
     loadUsers();
     initWebSocket();

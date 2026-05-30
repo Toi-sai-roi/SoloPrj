@@ -551,11 +551,26 @@ function appendSystemMessage(text) {
   scrollToBottom();
 }
 
+// THAY THẾ TOÀN BỘ HÀM openLightbox TRONG FILE chat.js THÀNH ĐOẠN NÀY:
+// THAY THẾ CHÍNH XÁC HÀM openLightbox TRONG FILE chat.js
 function openLightbox(src) {
   const overlay = document.getElementById('lightbox-overlay');
   const img = document.getElementById('lightbox-img');
+  if (!overlay || !img) return;
+
   img.src = src;
   overlay.style.display = 'flex';
+
+  // ÉP TẦNG MAX: Đè chặt lên trên cái Modal Bio (99999) để không bị ẩn phía dưới
+  overlay.style.zIndex = '99999999';
+
+  // Giữ tỉ lệ nguyên bản trọn vẹn 100% của ảnh gốc không mất góc
+  img.style.objectFit = 'contain';
+  img.style.width = 'auto';
+  img.style.height = 'auto';
+  img.style.maxWidth = '90vw';
+  img.style.maxHeight = '90vh';
+
   setTimeout(() => {
     img.style.transform = 'scale(1)';
   }, 50);

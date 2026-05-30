@@ -24,9 +24,9 @@ function renderUsersList(filteredUsers = null) {
   const list = filteredUsers || AppState.usersData;
   const displayUsers = list.filter(u => u.username !== AppState.currentUser);
 
-  const container  = document.getElementById('users-list-container');
+  const container = document.getElementById('users-list-container');
   const blankState = document.getElementById('users-blank-state');
-  const countEl    = document.getElementById('users-count');
+  const countEl = document.getElementById('users-count');
 
   container.innerHTML = '';
 
@@ -42,10 +42,21 @@ function renderUsersList(filteredUsers = null) {
   displayUsers.forEach(user => {
     const card = document.createElement('div');
     card.className = 'user-card glass-panel';
+
+    // Khi click vào vùng card (trừ avatar) thì mở chat
     card.onclick = () => openChatWith(user.username);
+
+    // KIỂM TRA AVATAR: Nếu có base64 thì render thẻ img, nếu không thì lấy chữ cái đầu
+    const avatarContent = user.avatar
+      ? `<img src="${user.avatar}" class="user-avatar-img" style="width:100%; height:100%; border-radius:inherit; object-fit:cover; display:block;">`
+      : user.username.charAt(0).toUpperCase();
+
+    // Dùng event.stopPropagation() ở thẻ avatar để khi click xem profile, nó KHÔNG kích hoạt mở chat của thẻ cha
     card.innerHTML = `
       <div class="user-card-info">
-        <div class="user-avatar">${user.username.charAt(0)}</div>
+        <div class="user-avatar" onclick="event.stopPropagation(); openProfile('${user.username}')">
+          ${avatarContent}
+        </div>
         <div class="user-name">${user.username}</div>
       </div>
       <span class="status-dot ${user.online ? 'online' : 'offline'}" id="status-dot-${user.username}"></span>

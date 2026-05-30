@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="vi">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,9 +8,12 @@
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Orbitron:wght@400;600;800;900&display=swap" rel="stylesheet">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Orbitron:wght@400;600;800;900&display=swap"
+    rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
 </head>
+
 <body>
 
   <!-- SCREEN 1: AUTH -->
@@ -23,11 +27,13 @@
       <form id="auth-form" onsubmit="handleAuthSubmit(event)">
         <div class="auth-form-group">
           <label for="auth-username">USERNAME // NEURAL ID</label>
-          <input type="text" id="auth-username" class="cyber-input" placeholder="e.g. Neo101" required autocomplete="username">
+          <input type="text" id="auth-username" class="cyber-input" placeholder="e.g. Neo101" required
+            autocomplete="username">
         </div>
         <div class="auth-form-group">
           <label for="auth-password">PASSWORD // MATRIX KEY</label>
-          <input type="password" id="auth-password" class="cyber-input" placeholder="••••••••" required autocomplete="current-password">
+          <input type="password" id="auth-password" class="cyber-input" placeholder="••••••••" required
+            autocomplete="current-password">
         </div>
         <div id="auth-error-msg" class="auth-error">LỖI XỬ LÝ CHỨNG CHỈ</div>
         <div style="margin-top: 30px; display: flex; align-items: center; justify-content: space-between;">
@@ -35,7 +41,8 @@
           <div id="auth-spinner" class="spinner"></div>
         </div>
       </form>
-      <div style="margin-top: 24px; font-size: 8px; color: var(--text-muted); font-family: var(--font-tech); text-align: center; text-transform: uppercase;">
+      <div
+        style="margin-top: 24px; font-size: 8px; color: var(--text-muted); font-family: var(--font-tech); text-align: center; text-transform: uppercase;">
         SECURED VIA SHIELDED JWT PROTOCOL // SECURE SECTOR
       </div>
     </div>
@@ -46,7 +53,8 @@
     <header class="app-header">
       <div class="logo-text neon-text-cyan">CYBERPUNK // ROOMS</div>
       <div class="user-profile">
-        <span id="current-user-display" class="current-user-tag">USER // NEO</span>
+        <span id="current-user-display" class="current-user-tag"
+          onclick="openProfile(AppState.currentUser.toLowerCase())" style="cursor: pointer;">USER // NEO</span>
         <button class="cyber-btn" onclick="handleLogout()" style="padding: 6px 14px; font-size: 11px;">LOGOUT</button>
       </div>
     </header>
@@ -57,7 +65,8 @@
           <span style="font-size: 11px; color: var(--neon-cyan);" id="users-count">0 NODES</span>
         </div>
         <div class="search-container">
-          <input type="text" id="search-input" class="cyber-input" placeholder="Lọc danh sách người dùng trong sector..." oninput="filterUsers()">
+          <input type="text" id="search-input" class="cyber-input"
+            placeholder="Lọc danh sách người dùng trong sector..." oninput="filterUsers()">
         </div>
         <div id="users-list-container" class="users-list"></div>
         <div id="users-blank-state" class="blank-state" style="display: none;">
@@ -74,48 +83,67 @@
     <div class="chat-container glass-panel">
       <header class="chat-header">
         <div class="chat-partner-info">
-          <button class="cyber-btn cyan-alt" onclick="exitChat()" style="padding: 6px 14px; font-size: 11px; margin-right: 8px;">BACK</button>
-          <span id="chat-partner-avatar" class="user-avatar" style="width: 32px; height: 32px; font-size: 12px;">A</span>
+          <button class="cyber-btn cyan-alt" onclick="exitChat()"
+            style="padding: 6px 14px; font-size: 11px; margin-right: 8px;">BACK</button>
+          <span id="chat-partner-avatar" class="user-avatar"
+            style="width: 32px; height: 32px; font-size: 12px;">A</span>
           <div>
             <div id="chat-partner-name" class="chat-partner-name">CHAT WITH // BOB</div>
             <div style="display: flex; align-items: center; margin-top: 2px;">
               <span id="chat-partner-status-dot" class="status-dot offline"></span>
-              <span id="chat-partner-status-text" style="font-size: 9px; color: var(--text-muted); font-family: var(--font-tech); text-transform: uppercase;">OFFLINE</span>
+              <span id="chat-partner-status-text"
+                style="font-size: 9px; color: var(--text-muted); font-family: var(--font-tech); text-transform: uppercase;">OFFLINE</span>
             </div>
           </div>
         </div>
       </header>
       <div id="messages-area" class="messages-area"></div>
-      
+
       <!-- Hộp hiển thị file đính kèm xem trước -->
-      <div id="media-preview-container" class="glass-panel" style="display: none; padding: 10px; margin: 10px 24px 0 24px; border: 1px solid var(--neon-cyan); position: relative; flex-direction: row; align-items: center; gap: 12px; border-radius: 2px; background: rgba(8, 8, 12, 0.9);">
-        <div id="media-preview-wrapper" style="position: relative; width: 50px; height: 50px; border: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; overflow: hidden; background: rgba(0,0,0,0.3);">
+      <div id="media-preview-container" class="glass-panel"
+        style="display: none; padding: 10px; margin: 10px 24px 0 24px; border: 1px solid var(--neon-cyan); position: relative; flex-direction: row; align-items: center; gap: 12px; border-radius: 2px; background: rgba(8, 8, 12, 0.9);">
+        <div id="media-preview-wrapper"
+          style="position: relative; width: 50px; height: 50px; border: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; overflow: hidden; background: rgba(0,0,0,0.3);">
           <!-- Ảnh/video preview động -->
         </div>
         <div style="flex: 1; overflow: hidden;">
-          <div id="media-preview-name" style="font-size: 11px; font-family: var(--font-tech); color: var(--neon-cyan); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">FILE_NAME.PNG</div>
+          <div id="media-preview-name"
+            style="font-size: 11px; font-family: var(--font-tech); color: var(--neon-cyan); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+            FILE_NAME.PNG</div>
           <div id="media-preview-size" style="font-size: 9px; color: var(--text-muted);">256 KB</div>
         </div>
-        <button type="button" class="cyber-btn" onclick="clearMediaSelection()" style="padding: 4px 8px; font-size: 9px; border-color: var(--neon-pink); min-width: auto; height: auto;">CANCEL</button>
+        <button type="button" class="cyber-btn" onclick="clearMediaSelection()"
+          style="padding: 4px 8px; font-size: 9px; border-color: var(--neon-pink); min-width: auto; height: auto;">CANCEL</button>
       </div>
 
       <form id="chat-input-form" class="chat-input-bar" onsubmit="handleSendMessage(event)">
-        <input type="file" id="media-input" accept="image/*,video/*" style="display: none;" onchange="handleMediaSelect(event)">
-        <button type="button" class="cyber-btn cyan-alt" onclick="triggerMediaInput()" style="padding: 12px 18px; min-width: auto; line-height: 1; display: flex; align-items: center; justify-content: center;">📎</button>
-        <input type="text" id="chat-input-field" class="cyber-input" placeholder="Truyền dữ liệu lên đường truyền..." autocomplete="off">
+        <input type="file" id="media-input" accept="image/*,video/*" style="display: none;"
+          onchange="handleMediaSelect(event)">
+        <button type="button" class="cyber-btn cyan-alt" onclick="triggerMediaInput()"
+          style="padding: 12px 18px; min-width: auto; line-height: 1; display: flex; align-items: center; justify-content: center;">📎</button>
+        <input type="text" id="chat-input-field" class="cyber-input" placeholder="Truyền dữ liệu lên đường truyền..."
+          autocomplete="off">
         <button type="submit" class="cyber-btn" style="padding: 12px 24px; min-width: 90px;">SEND</button>
       </form>
-  <!-- Cyber Lightbox Overlay phóng to ảnh -->
-  <div id="lightbox-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(8, 8, 12, 0.95); z-index: 10000; justify-content: center; align-items: center; cursor: zoom-out;" onclick="closeLightbox()">
-    <button class="cyber-btn" style="position: absolute; top: 20px; right: 20px; border-color: var(--neon-pink); padding: 8px 16px; font-size: 11px; min-width: auto; cursor: pointer;">CLOSE [X]</button>
-    <img id="lightbox-img" src="" style="max-width: 90%; max-height: 90%; border: 2px solid var(--neon-cyan); box-shadow: 0 0 30px rgba(0, 240, 255, 0.4); object-fit: contain; transform: scale(0.9); transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);">
-  </div>
+      <!-- Cyber Lightbox Overlay phóng to ảnh -->
+      <div id="lightbox-overlay"
+        style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(8, 8, 12, 0.96); z-index: 10000; justify-content: center; align-items: center; cursor: zoom-out;"
+        onclick="closeLightbox()">
+        <button class="cyber-btn"
+          style="position: absolute; top: 20px; right: 20px; border-color: var(--neon-pink); padding: 8px 16px; font-size: 11px; min-width: auto; cursor: pointer;">CLOSE
+          [X]</button>
+        <img id="lightbox-img" src=""
+          style="max-width: 90%; max-height: 90%; border: 2px solid var(--neon-cyan); box-shadow: 0 0 30px rgba(0, 240, 255, 0.3); transition: transform 0.2s ease-out; transform: scale(0.9);"
+          onclick="event.stopPropagation()">
+      </div>
 
-  <!-- JS: utils -> app (state) -> modules -->
-  <script src="js/utils.js"></script>
-  <script src="js/app.js"></script>
-  <script src="js/auth.js"></script>
-  <script src="js/users.js"></script>
-  <script src="js/chat.js"></script>
+      <!-- JS: utils -> app (state) -> modules -->
+      <script src="js/utils.js"></script>
+      <script src="js/app.js"></script>
+      <script src="js/auth.js"></script>
+      <script src="js/users.js"></script>
+      <script src="js/chat.js"></script>
+      <script src="js/profile.js"></script>
 </body>
+
 </html>
