@@ -1,7 +1,7 @@
-// ==========================================
-// chat.js — Version 3.4 Production Ready (Optimized)
-// WebSocket + Chat Room logic + Reactions + Typing + Read Receipt
-// ==========================================
+// =========================================================================
+// chat.js — Version 3.4 Production Ready (Optimized + Cyberpunk Block Logic)
+// WebSocket + Chat Room logic + Reactions + Typing + Read Receipt + Block Check
+// =========================================================================
 
 let typingTimeout = null;
 let currentReactionMessageId = null;
@@ -35,6 +35,39 @@ function getTopReactions(reactionMap, reactionTimestamps = {}) {
   return sorted.map(item => ({ emoji: item.emoji, count: item.count }));
 }
 
+// 🔥 TÍCH HỢP VỊ TRÍ 1: Hàm kiểm tra trạng thái quan hệ song phương và khóa/mở khóa ô chat
+async function checkChatLockState(targetUser) {
+  try {
+    const res = await fetch(`/api/friends/status/${encodeURIComponent(targetUser)}`, { 
+      headers: { 'Authorization': `Bearer ${AppState.token}` } 
+    });
+    const relData = await res.json();
+    const inputField = document.getElementById('chat-input-field');
+    const sendBtn = document.getElementById('chat-send-btn'); 
+
+    if (inputField) {
+      if (relData.relation === 'blocking') {
+        inputField.disabled = true;
+        inputField.placeholder = "BẠN ĐÃ KHÓA KẾT NỐI VỚI NODE NÀY. HÃY MỞ CHẶN ĐỂ GIAO TIẾP.";
+        inputField.value = "";
+        if (sendBtn) sendBtn.disabled = true;
+      } else if (relData.relation === 'blocked_by') {
+        inputField.disabled = true;
+        inputField.placeholder = "NODE NÀY ĐÃ NGẮT KẾT NỐI ĐẾN BẠN [ACCESS_DENIED]...";
+        inputField.value = "";
+        if (sendBtn) sendBtn.disabled = true;
+      } else {
+        // Mở khóa nếu trạng thái bình thường (Bạn bè, pending, hoặc chưa kết nối)
+        inputField.disabled = false;
+        inputField.placeholder = "Nhập mã lệnh giao tiếp bảo mật...";
+        if (sendBtn) sendBtn.disabled = false;
+      }
+    }
+  } catch (err) {
+    console.error("❌ Lỗi kiểm tra cấu trúc khóa mạng lưới chat:", err);
+  }
+}
+
 function initWebSocket() {
   if (AppState.ws) AppState.ws.close();
 
@@ -63,9 +96,26 @@ function initWebSocket() {
         }
 
         case 'system': {
-          // Khắc phục hạt sạn #3: Chỉ hiện thông báo hệ thống nếu liên quan đến người đang chat trực tiếp
-          if (AppState.activeChatPartner && data.text.includes(AppState.activeChatPartner)) {
+          // 1. Nếu là tin nhắn hệ thống thông báo bị đối phương chặn (ACCESS_DENIED)
+          if (data.text.includes('ACCESS_DENIED')) {
+            // Render dòng chữ thông báo lỗi ra giữa khung chat
             appendSystemMessage(data.text);
+            
+            // Tìm ô nhập liệu và nút gửi để khóa cứng lại
+            const inputField = document.getElementById('chat-input-field');
+            const sendBtn = document.getElementById('chat-send-btn'); 
+            if (inputField) {
+              inputField.disabled = true;
+              inputField.placeholder = "BẠN ĐÃ BỊ CHẶN KẾT NỐI ĐẾN NODE NÀY...";
+              inputField.value = ""; // Xóa sạch chữ đang gõ dở
+            }
+            if (sendBtn) sendBtn.disabled = true;
+          } 
+          // 2. Các thông báo hệ thống thông thường (Ví dụ: ai đó đăng nhập/đăng xuất mạng lưới)
+          else {
+            if (AppState.activeChatPartner && data.text.includes(AppState.activeChatPartner)) {
+              appendSystemMessage(data.text);
+            }
           }
           break;
         }
@@ -208,12 +258,11 @@ function showReactionPicker(messageId, event) {
   `;
 
   const rect = event.target.getBoundingClientRect();
-  const pickerWidth = 360; // Chiều rộng ước tính tối đa của picker chứa 8 emoji
+  const pickerWidth = 360; 
 
   picker.style.position = 'fixed';
   picker.style.bottom = (window.innerHeight - rect.top + 8) + 'px';
 
-  // THUẬT TOÁN ĐẨY TRÁI (IN-SCREEN): Nếu mút bên phải vượt quá màn hình, neo lề theo bên phải của nút 😊
   if (rect.left + pickerWidth > window.innerWidth) {
     picker.style.right = (window.innerWidth - rect.right - 10) + 'px';
     picker.style.left = 'auto';
@@ -258,18 +307,16 @@ function updateMessageReaction(messageId, reactionMapRaw, reactionTimestampsRaw)
   const messageDiv = document.querySelector(`.msg-wrapper[data-message-id="${messageId}"]`);
   if (!messageDiv) return;
 
-  // TÌM HOẶC TẠO LẠI KHUNG CHỨA REACTION BÊN TRONG BONG BÓNG CHAT
   const msgBubble = messageDiv.querySelector('.msg-bubble');
-  if (!msgBubble) return; // Phòng hờ lỗi cấu trúc HTML không tìm thấy bubble
+  if (!msgBubble) return; 
 
   let reactionsRow = msgBubble.querySelector('.reactions-row');
   if (!reactionsRow) {
     reactionsRow = document.createElement('div');
     reactionsRow.className = 'reactions-row';
-    msgBubble.appendChild(reactionsRow); // Luôn chèn vào cuối thẻ .msg-bubble để đúng cấu trúc khi F5
+    msgBubble.appendChild(reactionsRow); 
   }
 
-  // Chuẩn hóa dữ liệu đầu vào trước khi đếm top reaction
   const reactionMap = typeof reactionMapRaw === 'string' ? JSON.parse(reactionMapRaw) : (reactionMapRaw || {});
   const reactionTimestamps = typeof reactionTimestampsRaw === 'string' ? JSON.parse(reactionTimestampsRaw) : (reactionTimestampsRaw || {});
   const topReactions = getTopReactions(reactionMap, reactionTimestamps);
@@ -317,6 +364,9 @@ function openChatWith(username) {
   }
 
   hideTypingIndicator();
+
+  // 🔥 TÍCH HỢP VỊ TRÍ 2: Thực hiện quét kiểm tra trạng thái Block từ API ngay khi vừa click mở chat
+  checkChatLockState(username);
 }
 
 // --- Media Attachment ---
@@ -423,7 +473,6 @@ function appendChatMessage(msg) {
     bubbleContent = escapeHTML(msg.text || '');
   }
 
-  // Read receipt status
   let statusIcon = '';
   if (isSelf) {
     if (msg.read_at) {
@@ -435,7 +484,6 @@ function appendChatMessage(msg) {
     }
   }
 
-  // Ép kiểu bóc tách dữ liệu phản hồi an toàn
   let reactionMap = typeof msg.reactions === 'string' ? JSON.parse(msg.reactions) : (msg.reactions || {});
   let reactionTimestamps = typeof msg.reaction_timestamps === 'string' ? JSON.parse(msg.reaction_timestamps) : (msg.reaction_timestamps || {});
 
@@ -456,7 +504,6 @@ function appendChatMessage(msg) {
     }
   }
 
-  // Đưa nút 😊 ra hẳn ngoài cấu trúc để Flexbox của CSS tự động điều hướng trái/phải
   wrapper.innerHTML = `
     <div class="msg-sender">${msg.sender}</div>
     <div class="msg-content-node">
@@ -471,7 +518,6 @@ function appendChatMessage(msg) {
   messagesArea.appendChild(wrapper);
   scrollToBottom();
 }
-
 
 function sendTypingStop() {
   if (!AppState.activeChatPartner) return;
@@ -551,8 +597,6 @@ function appendSystemMessage(text) {
   scrollToBottom();
 }
 
-// THAY THẾ TOÀN BỘ HÀM openLightbox TRONG FILE chat.js THÀNH ĐOẠN NÀY:
-// THAY THẾ CHÍNH XÁC HÀM openLightbox TRONG FILE chat.js
 function openLightbox(src) {
   const overlay = document.getElementById('lightbox-overlay');
   const img = document.getElementById('lightbox-img');
@@ -560,11 +604,8 @@ function openLightbox(src) {
 
   img.src = src;
   overlay.style.display = 'flex';
-
-  // ÉP TẦNG MAX: Đè chặt lên trên cái Modal Bio (99999) để không bị ẩn phía dưới
   overlay.style.zIndex = '99999999';
 
-  // Giữ tỉ lệ nguyên bản trọn vẹn 100% của ảnh gốc không mất góc
   img.style.objectFit = 'contain';
   img.style.width = 'auto';
   img.style.height = 'auto';

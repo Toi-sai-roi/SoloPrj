@@ -3,129 +3,116 @@
 // ==========================================
 
 // Hàm mở Modal Profile (Lớp 2)
-// THAY THẾ TOÀN BỘ HÀM openProfile TRONG FILE profile.js THÀNH BẢN VẬN HÀNH VERSION 5:
 async function openProfile(username) {
-    let modal = document.getElementById('cyber-profile-modal');
-    if (!modal) {
-        modal = document.createElement('div');
-        modal.id = 'cyber-profile-modal';
-        modal.className = 'profile-modal-overlay';
-        modal.style.zIndex = '99999';
-        document.body.appendChild(modal);
+  let modal = document.getElementById('cyber-profile-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'cyber-profile-modal';
+    modal.className = 'profile-modal-overlay';
+    modal.style.zIndex = '99999';
+    document.body.appendChild(modal);
+  }
+  modal.style.display = 'flex';
+  modal.innerHTML = `<div class="profile-modal-card glass-panel" style="text-align:center;"><div class="profile-modal-title">LOADING_NODE_DATA...</div></div>`;
+
+  try {
+    const response = await fetch(`/api/profile/${encodeURIComponent(username)}`, { headers: { 'Authorization': `Bearer ${AppState.token}` } });
+    if (!response.ok) throw new Error('Failed to fetch node info');
+    const profileData = await response.json();
+
+    const relResponse = await fetch(`/api/friends/status/${encodeURIComponent(username)}`, { headers: { 'Authorization': `Bearer ${AppState.token}` } });
+    const relData = await relResponse.json();
+    const isMe = (username === AppState.currentUser);
+
+    const avatarHtml = profileData.avatar
+      ? `<img src="${profileData.avatar}" id="profile-avatar-img" onclick="openInternalLightbox(event, this.src)" style="width:100%; height:100%; border-radius:4px; object-fit:cover; cursor:pointer;">`
+      : `<div id="profile-avatar-placeholder" style="font-size:42px; font-family:var(--font-tech);">${username.charAt(0).toUpperCase()}</div>`;
+
+    let actionButtonsHtml = '';
+    if (!isMe) {
+      let relButton = '';
+      if (relData.relation === 'none') {
+        relButton = `<button class="cyber-btn" onclick="handleFriendAction('${username}', 'request')" style="flex: 1; border-color:var(--neon-cyan); color:var(--neon-cyan); padding: 10px 5px;">CONNECT_NODE</button>`;
+      } else if (relData.relation === 'pending' && relData.sender === 'me') {
+        relButton = `<button class="cyber-btn" onclick="handleFriendAction('${username}', 'cancel')" style="flex: 1; border-color:var(--text-muted); color:var(--text-muted); padding: 10px 5px;">[ PENDING_CANCEL ]</button>`;
+      } else if (relData.relation === 'pending' && relData.sender === 'them') {
+        relButton = `
+          <div style="display:flex; gap:5px; flex:1;">
+            <button class="cyber-btn" onclick="handleFriendAction('${username}', 'request')" style="flex:1; border-color:var(--neon-green); color:var(--neon-green); padding: 10px 2px;">[ ACCEPT ]</button>
+            <button class="cyber-btn" onclick="handleFriendAction('${username}', 'cancel')" style="flex:1; border-color:var(--neon-pink); color:var(--neon-pink); padding: 10px 2px;">[ DECLINE ]</button>
+          </div>`;
+      } else if (relData.relation === 'friends') {
+        relButton = `<button class="cyber-btn" onclick="handleFriendAction('${username}', 'cancel')" style="flex: 1; border-color:var(--neon-purple); color:var(--neon-purple); padding: 10px 5px;">[ DISCONNECT_NODE ]</button>`;
+      } else if (relData.relation === 'blocking') {
+        relButton = `<button class="cyber-btn" onclick="handleUnblockAction('${username}')" style="flex: 1; border-color:var(--neon-green); color:var(--neon-green); padding: 10px 5px;">UNBLOCK_NODE</button>`;
+      }
+
+      actionButtonsHtml = `
+        <div style="display: flex; gap: 10px; width: 100%; align-items: center; margin-top: 15px;">
+          ${relButton}
+          ${relData.relation !== 'blocking' ? `<button class="cyber-btn" onclick="handleBlockAction('${username}')" style="border-color:var(--neon-pink); color:var(--neon-pink); width: 85px; padding: 10px 0;">BLOCK</button>` : ''}
+        </div>`;
     }
 
-    modal.style.display = 'flex';
     modal.innerHTML = `
-    <div class="profile-modal-card glass-panel" style="text-align:center;">
-      <div class="profile-modal-title">LOADING_DATA...</div>
-    </div>
-  `;
-
-    try {
-        // 1. Tải thông tin Profile cơ bản
-        const response = await fetch(`/api/profile/${username}`, {
-            headers: { 'Authorization': `Bearer ${AppState.token}` }
-        });
-        if (!response.ok) throw new Error('Không thể tải profile mạng lưới');
-        const profileData = await response.json();
-
-        // 2. Tải trạng thái quan hệ giữa 2 người
-        const relResponse = await fetch(`/api/friends/status/${username}`, {
-            headers: { 'Authorization': `Bearer ${AppState.token}` }
-        });
-        const relData = await relResponse.json();
-
-        const isMe = (username === AppState.currentUser);
-
-        const avatarHtml = profileData.avatar
-            ? `<img src="${profileData.avatar}" id="profile-avatar-img" onclick="openInternalLightbox(event, this.src)" style="width:100%; height:100%; border-radius:4px; object-fit:cover; cursor:pointer;">`
-            : `<div id="profile-avatar-placeholder" style="font-size:42px; font-family:var(--font-tech);">${username.charAt(0).toUpperCase()}</div>`;
-
-        // 3. Xử lý logic sinh Nút bấm tương tác dựa trên trạng thái quan hệ
-        let actionButtonsHtml = '';
-        if (!isMe) {
-            let relButton = '';
-            if (relData.relation === 'none') {
-                relButton = `<button class="cyber-btn" onclick="handleFriendAction('${username}', 'request')" style="flex: 1; border-color:var(--neon-cyan); color:var(--neon-cyan);">[ CONNECT_NODE ]</button>`;
-            } else if (relData.relation === 'pending' && relData.sender === 'me') {
-                relButton = `<button class="cyber-btn" onclick="handleFriendAction('${username}', 'cancel')" style="flex: 1; border-color:var(--text-muted); color:var(--text-muted);">[ PENDING_CANCEL ]</button>`;
-            } else if (relData.relation === 'pending' && relData.sender === 'them') {
-                relButton = `
-            <button class="cyber-btn" onclick="handleFriendAction('${username}', 'request')" style="flex: 1; border-color:var(--neon-green); color:var(--neon-green);">[ ACCEPT ]</button>
-            <button class="cyber-btn" onclick="handleFriendAction('${username}', 'cancel')" style="flex: 1; border-color:var(--neon-pink); color:var(--neon-pink);">[ DECLINE ]</button>
-        `;
-            } else if (relData.relation === 'friends') {
-                relButton = `<button class="cyber-btn" onclick="handleFriendAction('${username}', 'cancel')" style="flex: 1; border-color:var(--neon-purple); color:var(--neon-purple);">[ DISCONNECT_NODE ]</button>`;
-            } else if (relData.relation === 'blocking') {
-                relButton = `<div style="flex: 1; color:var(--neon-pink); font-family:var(--font-tech); font-size:12px; display:flex; align-items:center;">[ NODE_BLOCKED_BY_YOU ]</div>`;
-            }
-
-            // Bọc trong một hộp Flex để xếp ngang hoàn hảo không bao giờ vỡ dòng
-            actionButtonsHtml = `
-        <div style="display: flex; gap: 10px; width: 100%; align-items: center;">
-            ${relButton}
-            ${relData.relation !== 'blocking' ? `<button class="cyber-btn" onclick="handleBlockAction('${username}')" style="border-color:var(--neon-pink); color:var(--neon-pink); min-width: 80px;">[ BLOCK ]</button>` : ''}
-        </div>
-    `;
-        }
-
-        modal.innerHTML = `
       <div class="profile-modal-card glass-panel">
         <div class="profile-modal-header">
           <span class="profile-modal-title">NODE_PROFILE // ${username.toUpperCase()}</span>
           <button class="profile-close-btn" onclick="closeProfileModal()">&times;</button>
         </div>
         <div class="profile-modal-body">
-          
           <div class="profile-avatar-wrapper">
-            <div id="profile-avatar-display" class="profile-avatar-large">
-              ${avatarHtml}
-            </div>
-            ${isMe ? `
-              <label for="avatar-file-input" class="avatar-upload-trigger">
-                <span class="upload-icon">⚡</span> EDIT_AVATAR
-              </label>
-              <input type="file" id="avatar-file-input" accept="image/*" style="display:none" onchange="handleProfileUpdate(event)">
-            ` : ''}
+            <div id="profile-avatar-display" class="profile-avatar-large">${avatarHtml}</div>
+            ${isMe ? `<label for="avatar-file-input" class="avatar-upload-trigger">⚡ EDIT_AVATAR</label><input type="file" id="avatar-file-input" accept="image/*" style="display:none" onchange="handleProfileUpdate(event)">` : ''}
           </div>
-
           <div class="profile-info-fields">
-            <div class="profile-field">
-              <label>IDENTIFIER</label>
-              <input type="text" class="cyber-input" value="${username}" disabled style="opacity: 0.6;" />
-            </div>
-            
+            <div class="profile-field"><label>IDENTIFIER</label><input type="text" class="cyber-input" value="${username}" disabled style="opacity: 0.6;" /></div>
             <div class="profile-field">
               <label>BIOGRAPHY</label>
-              ${isMe ? `
-                <textarea id="profile-bio-input" class="cyber-input" style="resize:none; height:70px; font-family:var(--font-body);" placeholder="Nhập tiểu sử..." maxlength="100">${profileData.bio || ''}</textarea>
-              ` : `
-                <div class="cyber-input" style="height:auto; min-height:50px; background:rgba(0,0,0,0.2); font-family:var(--font-body); white-space:pre-wrap;">${profileData.bio || 'Chưa cấu hình tiểu sử...'}</div>
-              `}
+              ${isMe ? `<textarea id="profile-bio-input" class="cyber-input" style="resize:none; height:60px; font-family:var(--font-body);" maxlength="100">${profileData.bio || ''}</textarea>` : `<div class="cyber-input" style="height:auto; min-height:50px; background:rgba(0,0,0,0.2); font-family:var(--font-body); white-space:pre-wrap;">${profileData.bio || 'Chưa cấu hình tiểu sử...'}</div>`}
             </div>
-
-            <div class="profile-field" style="margin-top:15px; display:flex; justify-content:flex-start;">
-                ${actionButtonsHtml}
-            </div>
-
+            ${actionButtonsHtml}
             <div class="profile-field" style="margin-top:15px; font-family:var(--font-tech); font-size:11px; color:var(--text-muted); display:flex; justify-content:space-between;">
               <span>📅 JOINED: ${new Date(profileData.created_at).toLocaleDateString('vi-VN')}</span>
-              <span style="color:var(--neon-green)">● ONLINE</span>
+              <span style="color:${profileData.isBlockedReal ? 'var(--text-muted)' : 'var(--neon-green)'}">● ${profileData.lastSeenText.toUpperCase()}</span>
             </div>
-
-            ${isMe ? `
-              <button class="cyber-btn" onclick="saveProfileBio()" style="width:100%; margin-top:10px; padding:10px;">LƯU THÔNG TIN PROFILE</button>
-            ` : ''}
+            ${isMe ? `<button class="cyber-btn" onclick="saveProfileBio()" style="width:100%; margin-top:10px; padding:10px;">LƯU THÔNG TIN PROFILE</button>` : ''}
           </div>
         </div>
-      </div>
-    `;
+      </div>`;
+  } catch (err) {
+    console.error(err);
+    closeProfileModal();
+  }
+}
 
-    } catch (err) {
-        console.error('Lỗi mở profile:', err);
-        alert('Không thể kết xuất dữ liệu profile.');
-        closeProfileModal();
-    }
+async function handleBlockAction(targetUser) {
+  if (!confirm(`Xác nhận cô lập và chặn hoàn toàn Node ${targetUser.toUpperCase()}?`)) return;
+  try {
+    const response = await fetch('/api/block', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${AppState.token}` },
+      body: JSON.stringify({ target: targetUser })
+    });
+    const resData = await response.json();
+    alert(resData.message);
+    openProfile(targetUser);
+    if (typeof loadUsers === 'function') loadUsers();
+  } catch (e) { console.error(e); }
+}
+
+async function handleUnblockAction(targetUser) {
+  try {
+    const response = await fetch('/api/unblock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${AppState.token}` },
+      body: JSON.stringify({ target: targetUser })
+    });
+    const resData = await response.json();
+    alert(resData.message);
+    openProfile(targetUser);
+    if (typeof loadUsers === 'function') loadUsers();
+  } catch (e) { console.error(e); }
 }
 
 // Hàm xử lý tương tác Kết bạn / Hủy bạn

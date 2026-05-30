@@ -14,7 +14,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'cyberpunk-neon-glow-secret-2026';
 const DB_PATH = path.join(__dirname, 'chat.db');
 
 // ==========================================
-// DATABASE (Đã tích hợp sẵn cột Avatar, Bio, Last_seen)
+// DATABASE
 // ==========================================
 const db = new Database(DB_PATH);
 
@@ -56,11 +56,11 @@ db.exec(`
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     user_one    TEXT NOT NULL,
     user_two    TEXT NOT NULL,
-    status      TEXT DEFAULT 'pending', -- 'pending' (chờ), 'accepted' (bạn bè)
+    status      TEXT DEFAULT 'pending',
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_one) REFERENCES users(username),
     FOREIGN KEY (user_two) REFERENCES users(username),
-    UNIQUE(user_one, user_two) -- Tránh trùng lặp quan hệ chéo
+    UNIQUE(user_one, user_two)
   );
 
   CREATE TABLE IF NOT EXISTS blocks (
@@ -83,27 +83,17 @@ function markMessagesRead(sender, receiver) {
   db.prepare(`UPDATE messages SET read_at = CURRENT_TIMESTAMP WHERE sender = ? AND receiver = ? AND read_at IS NULL`).run(sender, receiver);
 }
 
-// Cập nhật last_seen mỗi khi user tương tác mạng lưới
 function updateLastSeen(username) {
   db.prepare(`UPDATE users SET last_seen = CURRENT_TIMESTAMP WHERE username = ?`).run(username);
 }
 
-// ==========================================
-// ONLINE USERS MAP
-// ==========================================
 const onlineUsers = new Map();
 
-// ==========================================
-// AUTH HELPERS
-// ==========================================
 function generateSalt() { return crypto.randomBytes(16).toString('hex'); }
 function hashPassword(password, salt) {
   return crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
 }
 
-// ==========================================
-// HTTP HELPERS
-// ==========================================
 function getPostBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
@@ -129,9 +119,6 @@ function authenticateToken(req) {
   catch { return null; }
 }
 
-// ==========================================
-// STATIC FILE SERVER
-// ==========================================
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css',
@@ -162,7 +149,7 @@ function serveStatic(req, res) {
 }
 
 // ==========================================
-// HTTP SERVER
+// HTTP SERVER ROUTER
 // ==========================================
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -170,7 +157,6 @@ const server = http.createServer(async (req, res) => {
 
   res.setHeader('Access-Control-Allow-Origin', '*');
 
-  // POST /api/register
   if (pathname === '/api/register' && req.method === 'POST') {
     try {
       const { username, password } = await getPostBody(req);
@@ -188,7 +174,6 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // POST /api/login
   if (pathname === '/api/login' && req.method === 'POST') {
     try {
       const { username, password } = await getPostBody(req);
@@ -197,7 +182,7 @@ const server = http.createServer(async (req, res) => {
       const user = db.prepare('SELECT * FROM users WHERE username = ?').get(clean);
       if (!user || hashPassword(password, user.salt) !== user.password_hash) return sendJSON(res, 400, { error: 'Tài khoản hoặc mật khẩu không chính xác' });
 
-      updateLastSeen(clean); // Cập nhật thời gian online khi đăng nhập
+      updateLastSeen(clean);
       const token = jwt.sign({ username: clean }, JWT_SECRET, { expiresIn: '7d' });
       return sendJSON(res, 200, { success: true, token, username: clean });
     } catch (err) {
@@ -205,121 +190,102 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // Lấy danh sách users có kèm trường AVATAR để hiển thị ra danh sách chat lề trái
+  // Lấy danh sách users - Ép Offline khi dính block hai chiều độc lập
   if (pathname === '/api/users' && req.method === 'GET') {
     const payload = authenticateToken(req);
     if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
     try {
       const me = payload.username;
-      const allUsers = db.prepare('SELECT username, avatar FROM users ORDER BY username ASC').all();
+      const allUsers = db.prepare('SELECT username, avatar FROM users WHERE username != ? ORDER BY username ASC').all(me);
 
       const usersList = allUsers.map(u => {
-        // Kiểm tra xem giữa mình (me) và user này (u.username) có bất kỳ quan hệ chặn nào không
-        const hasBlock = db.prepare('SELECT 1 FROM blocks WHERE (blocker=? AND blocked=?) OR (blocker=? AND blocked=?)').get(me, u.username, u.username, me);
-
+        const hasBlock = db.prepare('SELECT 1 FROM blocks WHERE (blocker=? AND blocked=?) OR (blocker=? AND blocked=?)').get([me, u.username, u.username, me]);
         return {
           username: u.username,
           avatar: u.avatar,
-          // Nếu dính block thì ép cứng thành offline (false), nếu không dính thì check map online thực tế
           online: hasBlock ? false : onlineUsers.has(u.username)
         };
       });
-
       return sendJSON(res, 200, usersList);
     } catch (err) {
       return sendJSON(res, 500, { error: 'Không thể lấy danh sách user' });
     }
   }
 
-  // Đồng bộ API Profile khớp với endpoint gọi từ Client
+  // Profile Endpoint - Ép trạng thái ngoại tuyến động nếu dính block
   if (pathname.startsWith('/api/profile/') && req.method === 'GET') {
     const payload = authenticateToken(req);
     if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
 
-    // THÊM decodeURIComponent VÀO ĐÂY:
-    const rawUsername = pathname.split('/').pop();
-    if (!rawUsername) return sendJSON(res, 400, { error: 'Missing username' });
-    const username = decodeURIComponent(rawUsername);
+    const me = payload.username;
+    const target = decodeURIComponent(pathname.split('/').pop());
+    if (!target) return sendJSON(res, 400, { error: 'Missing username' });
 
-    const user = db.prepare(`
-    SELECT username, avatar, bio, last_seen, created_at 
-    FROM users WHERE username = ?
-  `).get(username);
-
+    const user = db.prepare(`SELECT username, avatar, bio, last_seen, created_at FROM users WHERE username = ?`).get(target);
     if (!user) return sendJSON(res, 404, { error: 'User not found' });
 
-    // Thuật toán tính toán chuỗi hiển thị thời gian hoạt động động
-    const lastSeen = new Date(user.last_seen);
-    const now = new Date();
-    const diffMinutes = Math.floor((now - lastSeen) / 60000);
+    const hasBlock = db.prepare('SELECT 1 FROM blocks WHERE (blocker=? AND blocked=?) OR (blocker=? AND blocked=?)').get([me, target, target, me]);
+
     let lastSeenText = '';
+    if (hasBlock) {
+      lastSeenText = 'Ngoại tuyến';
+    } else {
+      const lastSeen = new Date(user.last_seen);
+      const now = new Date();
+      const diffMinutes = Math.floor((now - lastSeen) / 60000);
+      if (onlineUsers.has(target)) lastSeenText = 'Đang hoạt động';
+      else if (diffMinutes < 1) lastSeenText = 'Vừa hoạt động';
+      else if (diffMinutes < 60) lastSeenText = `${diffMinutes} phút trước`;
+      else if (diffMinutes < 1440) lastSeenText = `${Math.floor(diffMinutes / 60)} giờ trước`;
+      else lastSeenText = `${new Date(user.last_seen).toLocaleDateString('vi-VN')}`;
+    }
 
-    if (onlineUsers.has(username)) lastSeenText = 'Đang hoạt động';
-    else if (diffMinutes < 1) lastSeenText = 'Vừa hoạt động';
-    else if (diffMinutes < 60) lastSeenText = `${diffMinutes} phút trước`;
-    else if (diffMinutes < 1440) lastSeenText = `${Math.floor(diffMinutes / 60)} giờ trước`;
-    else lastSeenText = `${new Date(user.last_seen).toLocaleDateString('vi-VN')}`;
-
-    return sendJSON(res, 200, { ...user, lastSeenText });
+    return sendJSON(res, 200, { ...user, lastSeenText, isBlockedReal: !!hasBlock });
   }
 
-  // PUT /api/profile - Cập nhật avatar + bio tiểu sử cá nhân
   if (pathname === '/api/profile' && req.method === 'PUT') {
     const payload = authenticateToken(req);
     if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
-
     try {
       const { avatar, bio } = await getPostBody(req);
       updateLastSeen(payload.username);
-
-      if (avatar !== undefined) {
-        db.prepare('UPDATE users SET avatar = ? WHERE username = ?').run(avatar, payload.username);
-      }
-      if (bio !== undefined) {
-        const cleanBio = bio.trim().slice(0, 100);
-        db.prepare('UPDATE users SET bio = ? WHERE username = ?').run(cleanBio, payload.username);
-      }
+      if (avatar !== undefined) db.prepare('UPDATE users SET avatar = ? WHERE username = ?').run(avatar, payload.username);
+      if (bio !== undefined) db.prepare('UPDATE users SET bio = ? WHERE username = ?').run(bio.trim().slice(0, 100), payload.username);
       return sendJSON(res, 200, { success: true });
     } catch (err) {
-      return sendJSON(res, 500, { error: 'Lỗi hệ thống khi cập nhật profile' });
+      return sendJSON(res, 500, { error: 'Lỗi hệ thống' });
     }
   }
 
-  // =========================================================================
-  // API VERSION 5: FRIENDS & BLOCKS CONTROLLER (HTTP PURE NODE.JS)
-  // =========================================================================
-
-  // 1. POST /api/friends/request — Gửi lời mời kết bạn hoặc chấp nhận chéo
+  // Gửi yêu cầu kết bạn
   if (pathname === '/api/friends/request' && req.method === 'POST') {
     const payload = authenticateToken(req);
     if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
-
     try {
       const { receiver } = await getPostBody(req);
       const sender = payload.username;
-
       if (!receiver || sender === receiver) return sendJSON(res, 400, { error: 'Dữ liệu không hợp lệ' });
 
-      const isBlocked = db.prepare('SELECT 1 FROM blocks WHERE (blocker=? AND blocked=?) OR (blocker=? AND blocked=?)').get(sender, receiver, receiver, sender);
+      const isBlocked = db.prepare('SELECT 1 FROM blocks WHERE (blocker=? AND blocked=?) OR (blocker=? AND blocked=?)').get([sender, receiver, receiver, sender]);
       if (isBlocked) return sendJSON(res, 403, { error: 'NODE_BLOCKED: Giao tiếp bị chặn' });
 
       const u1 = sender < receiver ? sender : receiver;
       const u2 = sender < receiver ? receiver : sender;
-
-      const existing = db.prepare('SELECT * FROM friends WHERE user_one = ? AND user_two = ?').get(u1, u2);
+      const existing = db.prepare('SELECT * FROM friends WHERE user_one = ? AND user_two = ?').get([u1, u2]);
 
       if (!existing) {
         db.prepare('INSERT INTO friends (user_one, user_two, status) VALUES (?, ?, "pending")').run(u1, u2);
         broadcastToUser(receiver, { type: 'friend_request', from: sender });
         return sendJSON(res, 200, { status: 'pending', message: 'Đã gửi yêu cầu kết nối Node' });
       } else if (existing.status === 'pending') {
-        const originalSender = (existing.user_one === u1 && !db.prepare('SELECT 1 FROM friends WHERE user_one=? AND status="pending"').get(sender)) ? u2 : u1;
+        const hasSentPending = db.prepare('SELECT 1 FROM friends WHERE user_one=? AND status="pending"').get(sender);
+        const originalSender = hasSentPending ? u1 : u2;
         if (originalSender !== sender) {
           db.prepare('UPDATE friends SET status = "accepted" WHERE user_one = ? AND user_two = ?').run(u1, u2);
           broadcastToUser(receiver, { type: 'friend_accepted', from: sender });
-          return sendJSON(res, 200, { status: 'accepted', message: 'Đã thiết lập liên kết bạn bè thành công' });
+          return sendJSON(res, 200, { status: 'accepted', message: 'Đã thiết lập liên kết thành công' });
         }
-        return sendJSON(res, 200, { status: 'pending', message: 'Yêu cầu đang trong trạng thái chờ xử lý' });
+        return sendJSON(res, 200, { status: 'pending', message: 'Yêu cầu đang chờ xử lý' });
       } else {
         return sendJSON(res, 200, { status: 'accepted', message: 'Hai Node đã liên kết từ trước' });
       }
@@ -328,41 +294,37 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // 2. GET /api/friends/status/:username — Lấy trạng thái quan hệ
+  // Kiểm tra trạng thái quan hệ song phương
   if (pathname.startsWith('/api/friends/status/') && req.method === 'GET') {
     const payload = authenticateToken(req);
     if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
-
     const target = decodeURIComponent(pathname.split('/').pop());
     const me = payload.username;
 
-    const isBlockedMe = db.prepare('SELECT 1 FROM blocks WHERE blocker=? AND blocked=?').get(me, target);
+    const isBlockedMe = db.prepare('SELECT 1 FROM blocks WHERE blocker=? AND blocked=?').get([me, target]);
     if (isBlockedMe) return sendJSON(res, 200, { relation: 'blocking' });
 
-    const isBlockedByTarget = db.prepare('SELECT 1 FROM blocks WHERE blocker=? AND blocked=?').get(target, me);
+    const isBlockedByTarget = db.prepare('SELECT 1 FROM blocks WHERE blocker=? AND blocked=?').get([target, me]);
     if (isBlockedByTarget) return sendJSON(res, 200, { relation: 'blocked_by' });
 
     const u1 = me < target ? me : target;
     const u2 = me < target ? target : me;
-    const row = db.prepare('SELECT * FROM friends WHERE user_one = ? AND user_two = ?').get(u1, u2);
+    const row = db.prepare('SELECT * FROM friends WHERE user_one = ? AND user_two = ?').get([u1, u2]);
 
     if (!row) return sendJSON(res, 200, { relation: 'none' });
     if (row.status === 'accepted') return sendJSON(res, 200, { relation: 'friends' });
-
     return sendJSON(res, 200, { relation: 'pending', sender: row.user_one === me ? 'me' : 'them' });
   }
 
-  // 3. DELETE /api/friends/cancel — Từ chối hoặc hủy kết bạn
+  // Hủy kết nối / Từ chối bạn bè
   if (pathname === '/api/friends/cancel' && req.method === 'DELETE') {
     const payload = authenticateToken(req);
     if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
-
     try {
       const { target } = await getPostBody(req);
       const me = payload.username;
       const u1 = me < target ? me : target;
       const u2 = me < target ? target : me;
-
       db.prepare('DELETE FROM friends WHERE user_one = ? AND user_two = ?').run(u1, u2);
       return sendJSON(res, 200, { success: true, message: 'Đã hủy kết nối mạng lưới' });
     } catch (err) {
@@ -370,25 +332,45 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // 4. POST /api/block — Chặn người dùng
+  // Khởi chạy hành vi BLOCK chặn người dùng
   if (pathname === '/api/block' && req.method === 'POST') {
     const payload = authenticateToken(req);
     if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
-
     try {
       const { target } = await getPostBody(req);
       const blocker = payload.username;
-
-      if (!target || blocker === target) return sendJSON(res, 400, { error: 'Thao tác không hợp lệ' });
+      if (!target || blocker === target) return sendJSON(res, 400, { error: 'Dữ liệu không hợp lệ' });
 
       db.prepare('INSERT OR IGNORE INTO blocks (blocker, blocked) VALUES (?, ?)').run(blocker, target);
+      // Khi chặn thì đồng thời xóa luôn quan hệ kết bạn nếu có
       const u1 = blocker < target ? blocker : target;
       const u2 = blocker < target ? target : blocker;
       db.prepare('DELETE FROM friends WHERE user_one = ? AND user_two = ?').run(u1, u2);
 
-      return sendJSON(res, 200, { success: true, message: 'Đã chặn liên lạc hoàn toàn với Node này' });
+      // Bắn tin cập nhật ép offline tức thì về Client
+      broadcastStatusChangeToPair(blocker, target);
+
+      return sendJSON(res, 200, { success: true, message: `Mạng lưới đã cách ly nút ${target.toUpperCase()}` });
     } catch (err) {
-      return sendJSON(res, 500, { error: 'Lỗi hệ thống khi block' });
+      return sendJSON(res, 500, { error: 'Lỗi xử lý block' });
+    }
+  }
+
+  // API UNBLOCK - Mở khóa chặn
+  if (pathname === '/api/unblock' && req.method === 'POST') {
+    const payload = authenticateToken(req);
+    if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
+    try {
+      const { target } = await getPostBody(req);
+      const blocker = payload.username;
+      if (!target) return sendJSON(res, 400, { error: 'Dữ liệu không hợp lệ' });
+
+      db.prepare('DELETE FROM blocks WHERE blocker = ? AND blocked = ?').run(blocker, target);
+      broadcastStatusChangeToPair(blocker, target);
+
+      return sendJSON(res, 200, { success: true, message: 'Đã mở khóa kết nối mạng lưới thành công' });
+    } catch (err) {
+      return sendJSON(res, 500, { error: 'Lỗi máy chủ khi mở chặn' });
     }
   }
 
@@ -397,7 +379,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 // ==========================================
-// WEBSOCKET SERVER
+// WEBSOCKET SERVER LOGIC
 // ==========================================
 const wss = new ws.Server({ noServer: true });
 
@@ -417,15 +399,33 @@ server.on('upgrade', (request, socket, head) => {
 });
 
 function broadcastStatusChange(username, online) {
-  const payload = JSON.stringify({ type: 'status_change', username, online });
-  for (const connections of onlineUsers.values())
+  for (const [targetUser, connections] of onlineUsers.entries()) {
+    const hasBlock = db.prepare('SELECT 1 FROM blocks WHERE (blocker=? AND blocked=?) OR (blocker=? AND blocked=?)').get([username, targetUser, targetUser, username]);
+    const payload = JSON.stringify({ type: 'status_change', username, online: hasBlock ? false : online });
     connections.forEach(c => c.readyState === ws.OPEN && c.send(payload));
+  }
+}
+
+function broadcastStatusChangeToPair(userA, userB) {
+  const isAOnline = onlineUsers.has(userA);
+  const isBOnline = onlineUsers.has(userB);
+  const hasBlock = db.prepare('SELECT 1 FROM blocks WHERE (blocker=? AND blocked=?) OR (blocker=? AND blocked=?)').get([userA, userB, userB, userA]);
+
+  if (isAOnline) {
+    const msgToA = JSON.stringify({ type: 'status_change', username: userB, online: hasBlock ? false : isBOnline });
+    onlineUsers.get(userA).forEach(c => c.readyState === ws.OPEN && c.send(msgToA));
+  }
+  if (isBOnline) {
+    const msgToB = JSON.stringify({ type: 'status_change', username: userA, online: hasBlock ? false : isAOnline });
+    onlineUsers.get(userB).forEach(c => c.readyState === ws.OPEN && c.send(msgToB));
+  }
 }
 
 function broadcastSystemMessage(text) {
   const payload = JSON.stringify({ type: 'system', text, timestamp: new Date().toISOString() });
-  for (const connections of onlineUsers.values())
+  for (const [targetUser, connections] of onlineUsers.entries()) {
     connections.forEach(c => c.readyState === ws.OPEN && c.send(payload));
+  }
 }
 
 wss.on('connection', (wsConn, request, username) => {
@@ -436,10 +436,7 @@ wss.on('connection', (wsConn, request, username) => {
   wsConn.on('pong', () => { isAlive = true; updateLastSeen(username); });
 
   const pingInterval = setInterval(() => {
-    if (!isAlive) {
-      console.log(`[WS] ${username} heartbeat timeout, terminating`);
-      return wsConn.terminate();
-    }
+    if (!isAlive) return wsConn.terminate();
     isAlive = false;
     wsConn.ping();
   }, 30000);
@@ -450,211 +447,84 @@ wss.on('connection', (wsConn, request, username) => {
   if (onlineUsers.get(username).size === 1) {
     broadcastStatusChange(username, true);
     broadcastSystemMessage(`${username} đã đăng nhập vào mạng lưới.`);
-
-    const unreadMessages = db.prepare(`
-      SELECT DISTINCT sender FROM messages 
-      WHERE receiver = ? AND read_at IS NULL
-    `).all(username);
-
-    unreadMessages.forEach(msg => {
-      if (onlineUsers.has(msg.sender)) {
-        const readReceipt = { type: 'read_receipt', reader: username, with: msg.sender };
-        onlineUsers.get(msg.sender).forEach(c => {
-          if (c.readyState === ws.OPEN) c.send(JSON.stringify(readReceipt));
-        });
-      }
-    });
   }
 
   wsConn.on('message', (messageStr) => {
     try {
       const data = JSON.parse(messageStr);
-      updateLastSeen(username); // Ghi nhận hành vi tương tác liên tục
+      updateLastSeen(username);
 
       if (data.type === 'typing') {
         const { to, isTyping } = data;
         if (!to) return;
+        const hasBlock = db.prepare('SELECT 1 FROM blocks WHERE (blocker=? AND blocked=?) OR (blocker=? AND blocked=?)').get([username, to, to, username]);
+        if (hasBlock) return; // Nếu block, nuốt sự kiện đang gõ chữ
+
         const typingMsg = { type: 'typing', sender: username, isTyping };
         if (onlineUsers.has(to)) {
-          onlineUsers.get(to).forEach(c => {
-            if (c.readyState === ws.OPEN) c.send(JSON.stringify(typingMsg));
-          });
+          onlineUsers.get(to).forEach(c => { if (c.readyState === ws.OPEN) c.send(JSON.stringify(typingMsg)); });
         }
         return;
       }
 
+      // get_history - FIX cú pháp mảng truyền vào câu lệnh SQLite (.get)
       if (data.type === 'get_history') {
         const { with: withUser } = data;
         if (!withUser) return;
 
-        // KIỂM TRA BLOCK TRƯỚC KHI ĐÁNH DẤU ĐÃ ĐỌC
-        const anyBlock = db.prepare('SELECT 1 FROM blocks WHERE (blocker=? AND blocked=?) OR (blocker=? AND blocked=?)').get(username, withUser, withUser, username);
-
+        const anyBlock = db.prepare('SELECT 1 FROM blocks WHERE (blocker=? AND blocked=?) OR (blocker=? AND blocked=?)').get([username, withUser, withUser, username]);
         if (!anyBlock) {
-          // Chỉ khi KHÔNG CÓ AI CHẶN AI thì mới cho phép mark Đã đọc và bắn read_receipt đi
           markMessagesRead(withUser, username);
           if (onlineUsers.has(withUser)) {
             const readReceipt = { type: 'read_receipt', reader: username, with: withUser };
-            onlineUsers.get(withUser).forEach(c => {
-              if (c.readyState === 1) c.send(JSON.stringify(readReceipt));
-            });
+            onlineUsers.get(withUser).forEach(c => { if (c.readyState === ws.OPEN) c.send(JSON.stringify(readReceipt)); });
           }
         }
-        const history = db.prepare(` 
-          SELECT 
-            m.id, m.sender, m.receiver, m.text, m.timestamp, m.delivered, m.read_at,
-            COALESCE((
-              SELECT json_group_object(emoji, total_count) 
-              FROM (SELECT emoji, SUM(count) as total_count FROM reactions WHERE message_id = m.id GROUP BY emoji)
-            ), '{}') as reactions,
-            COALESCE((
-              SELECT json_group_object(emoji, max_ts) 
-              FROM (SELECT emoji, MAX(strftime('%s', created_at)) as max_ts FROM reactions WHERE message_id = m.id GROUP BY emoji)
-            ), '{}') as reaction_timestamps
-          FROM messages m
-          WHERE (m.sender = ? AND m.receiver = ?) OR (m.sender = ? AND m.receiver = ?)
-          ORDER BY m.timestamp ASC
+        const history = db.prepare(`
+          SELECT m.id, m.sender, m.receiver, m.text, m.timestamp, m.delivered, m.read_at,
+            COALESCE((SELECT json_group_object(emoji, total_count) FROM (SELECT emoji, SUM(count) as total_count FROM reactions WHERE message_id = m.id GROUP BY emoji)), '{}') as reactions,
+            COALESCE((SELECT json_group_object(emoji, max_ts) FROM (SELECT emoji, MAX(strftime('%s', created_at)) as max_ts FROM reactions WHERE message_id = m.id GROUP BY emoji)), '{}') as reaction_timestamps
+          FROM messages m WHERE (m.sender = ? AND m.receiver = ?) OR (m.sender = ? AND m.receiver = ?) ORDER BY m.timestamp ASC
         `).all(username, withUser, withUser, username);
         wsConn.send(JSON.stringify({ type: 'history', with: withUser, messages: history }));
         return;
       }
 
-      if (data.type === 'add_reaction') {
-        const { messageId, emoji } = data;
-        if (!messageId || !emoji) return;
-        try {
-          const existing = db.prepare(`
-            SELECT id FROM reactions WHERE message_id = ? AND username = ? AND emoji = ?
-          `).get(messageId, username, emoji);
-
-          if (existing) {
-            db.prepare(`
-              UPDATE reactions SET count = count + 1, created_at = CURRENT_TIMESTAMP WHERE id = ?
-            `).run(existing.id);
-          } else {
-            db.prepare(`
-              INSERT INTO reactions (message_id, username, emoji, count) VALUES (?, ?, ?, 1)
-            `).run(messageId, username, emoji);
-          }
-
-          const message = db.prepare('SELECT sender, receiver FROM messages WHERE id = ?').get(messageId);
-          if (message) {
-            const allReactions = db.prepare(`
-              SELECT emoji, SUM(count) as total_count, MAX(strftime('%s', created_at)) as max_ts 
-              FROM reactions 
-              WHERE message_id = ? 
-              GROUP BY emoji
-            `).all(messageId);
-
-            const reactionMap = {};
-            const reactionTimestamps = {};
-
-            for (const r of allReactions) {
-              reactionMap[r.emoji] = Number(r.total_count);
-              reactionTimestamps[r.emoji] = parseInt(r.max_ts);
-            }
-
-            const reactionMsg = {
-              type: 'reaction_update',
-              messageId: messageId,
-              reactions: reactionMap,
-              reactionTimestamps: reactionTimestamps
-            };
-            const payload = JSON.stringify(reactionMsg);
-            if (onlineUsers.has(message.sender)) {
-              onlineUsers.get(message.sender).forEach(c => { if (c.readyState === ws.OPEN) c.send(payload); });
-            }
-            if (onlineUsers.has(message.receiver)) {
-              onlineUsers.get(message.receiver).forEach(c => { if (c.readyState === ws.OPEN) c.send(payload); });
-            }
-          }
-        } catch (err) {
-          console.error('Reaction error:', err.message);
-        }
-        return;
-      }
-
-      // =========================================================================
-      // THAY THẾ TOÀN BỘ BLOCK: if (data.type === 'send_message') TRONG server.js
-      // =========================================================================
       if (data.type === 'send_message') {
         const { to, text } = data;
         if (!to || !text?.trim()) return;
         const cleanText = text.trim();
 
-        // 1. Kiểm tra xem MÌNH (username) có đang CHẶN đối phương (to) hay không
-        const amIBlocking = db.prepare('SELECT 1 FROM blocks WHERE blocker = ? AND blocked = ?').get(username, to);
+        // Kiểm tra xem chính chủ có đang chặn người ta không
+        const amIBlocking = db.prepare('SELECT 1 FROM blocks WHERE blocker = ? AND blocked = ?').get([username, to]);
         if (amIBlocking) {
-          // Khóa mõm ngay lập tức tại Front-End/Back-End, không cho người chặn gửi bậy
-          const sysMsg = { type: 'system', text: `THAO TÁC BỊ TỪ CHỐI: Bạn phải bỏ chặn ${to.toUpperCase()} trước khi gửi tin nhắn.` };
-          return wsConn.send(JSON.stringify(sysMsg));
+          return wsConn.send(JSON.stringify({ type: 'system', text: `[ SYSTEM // THAO TÁC BỊ TỪ CHỐI: Bạn phải bỏ chặn đối phương để gửi tin nhắn ]` }));
         }
 
-        // 2. Kiểm tra xem ĐỐI PHƯƠNG (to) có đang CHẶN mình (username) hay không
-        const amIBlockedByThem = db.prepare('SELECT 1 FROM blocks WHERE blocker = ? AND blocked = ?').get(to, username);
+        // Kiểm tra đối phương chặn mình không
+        const amIBlockedByThem = db.prepare('SELECT 1 FROM blocks WHERE blocker = ? AND blocked = ?').get([to, username]);
         if (amIBlockedByThem) {
-          // Người bị chặn gửi tin: Server NUỐT TIN (không lưu DB), gửi cảnh báo hệ thống cục bộ về máy người gửi
-          const localSysMsg = {
-            type: 'system',
-            text: `[ SYSTEM // ACCESS_DENIED: Bạn đã bị ${to.toUpperCase()} chặn kết nối ]`,
-            timestamp: new Date().toISOString()
-          };
-          return wsConn.send(JSON.stringify(localSysMsg));
+          return wsConn.send(JSON.stringify({ type: 'system', text: `[ SYSTEM // ACCESS_DENIED: Bạn đã bị ${to.toUpperCase()} chặn kết nối ]` }));
         }
 
-        // --- NẾU KHÔNG BỊ CHẶN -> CHẠY LOGIC GỬI TIN TIÊU CHUẨN ---
         const isReceiverOnline = onlineUsers.has(to);
         const deliveredValue = isReceiverOnline ? 1 : 0;
 
-        const info = db.prepare(`
-          INSERT INTO messages (sender, receiver, text, delivered) 
-          VALUES (?, ?, ?, ?)
-        `).run(username, to, cleanText, deliveredValue);
-
-        const chatMsg = {
-          type: 'message',
-          id: Number(info.lastInsertRowid),
-          sender: username,
-          receiver: to,
-          text: cleanText,
-          timestamp: new Date().toISOString(),
-          delivered: deliveredValue,
-          read_at: null
-        };
-        const payload = JSON.stringify(chatMsg);
+        const info = db.prepare(`INSERT INTO messages (sender, receiver, text, delivered) VALUES (?, ?, ?, ?)`).run(username, to, cleanText, deliveredValue);
+        const chatMsg = { type: 'message', id: Number(info.lastInsertRowid), sender: username, receiver: to, text: cleanText, timestamp: new Date().toISOString(), delivered: deliveredValue, read_at: null };
 
         if (isReceiverOnline) {
-          onlineUsers.get(to).forEach(c => {
-            if (c.readyState === 1) c.send(payload);
-          });
+          onlineUsers.get(to).forEach(c => { if (c.readyState === ws.OPEN) c.send(JSON.stringify(chatMsg)); });
         }
-
-        if (onlineUsers.has(username)) {
-          onlineUsers.get(username).forEach(c => {
-            if (c !== wsConn && c.readyState === 1) {
-              c.send(JSON.stringify({ ...chatMsg, self: true }));
-            }
-          });
-        }
-
         wsConn.send(JSON.stringify({ ...chatMsg, self: true }));
-
-        if (isReceiverOnline && onlineUsers.has(username)) {
-          const deliveredReceipt = { type: 'delivered_receipt', messageId: chatMsg.id, to: username, from: to };
-          onlineUsers.get(username).forEach(c => {
-            if (c.readyState === 1) c.send(JSON.stringify(deliveredReceipt));
-          });
-        }
         return;
       }
     } catch (err) {
-      console.error('WS message error:', err.message);
+      console.error('WS error:', err.message);
     }
   });
 
   wsConn.on('close', () => {
-    console.log(`[WS] ${username} disconnected`);
-    db.prepare(`UPDATE users SET last_seen = CURRENT_TIMESTAMP WHERE username = ?`).run(username);
     clearInterval(pingInterval);
     const conns = onlineUsers.get(username);
     if (conns) {
@@ -666,28 +536,20 @@ wss.on('connection', (wsConn, request, username) => {
       }
     }
   });
-
-  wsConn.on('error', (err) => console.error(`[WS Error] ${username}:`, err.message));
 });
 
-
-// 5. Hàm tiện ích để gửi thông điệp đến một user cụ thể (dùng trong block/friend request)
 function broadcastToUser(targetUsername, payload) {
   if (onlineUsers.has(targetUsername)) {
     const stringData = JSON.stringify(payload);
     onlineUsers.get(targetUsername).forEach(client => {
-      if (client.readyState === 1) { // 1 nghĩa là đang OPEN
-        client.send(stringData);
-      }
+      if (client.readyState === ws.OPEN) client.send(stringData);
     });
   }
 }
-// ==========================================
-// START
-// ==========================================
+
 server.listen(PORT, () => {
   console.log(`====================================================`);
-  console.log(`🤖 CYBERPUNK CHAT SERVER RUNNING WITH VERSION 4`);
+  console.log(`🤖 CYBERPUNK SERVER RE-ENGINEERED SUCCESSFUL`);
   console.log(`🔗 http://localhost:${PORT}`);
   console.log(`====================================================`);
 });
