@@ -12,8 +12,32 @@ const AppState = {
   ws: null
 };
 
+// Theme toggle
+function initTheme() {
+  const savedTheme = localStorage.getItem('cyber_theme') || 'dark';
+  if (savedTheme === 'light') {
+    document.body.classList.add('light-theme');
+    const btn = document.getElementById('theme-toggle-btn');
+    if (btn) btn.textContent = '☀️';
+  }
+}
+
+function toggleTheme() {
+  const btn = document.getElementById('theme-toggle-btn');
+  if (document.body.classList.contains('light-theme')) {
+    document.body.classList.remove('light-theme');
+    localStorage.setItem('cyber_theme', 'dark');
+    btn.textContent = '🌙';
+  } else {
+    document.body.classList.add('light-theme');
+    localStorage.setItem('cyber_theme', 'light');
+    btn.textContent = '☀️';
+  }
+}
+
 // Khởi động app khi DOM sẵn sàng
 window.addEventListener('DOMContentLoaded', () => {
+  initTheme();
   if (AppState.token && AppState.currentUser) {
     const userDisplay = document.getElementById('current-user-display');
 
