@@ -34,7 +34,7 @@ async function openProfile(username) {
       if (relData.relation === 'none') {
         relButton = `<button class="cyber-btn" onclick="handleFriendAction('${username}', 'request')" style="flex: 1; border-color:var(--neon-cyan); color:var(--neon-cyan); padding: 10px 5px;">CONNECT_NODE</button>`;
       } else if (relData.relation === 'pending' && relData.sender === 'me') {
-        relButton = `<button class="cyber-btn" onclick="handleFriendAction('${username}', 'cancel')" style="flex: 1; border-color:var(--text-muted); color:var(--text-muted); padding: 10px 5px;">[ PENDING_CANCEL ]</button>`;
+        relButton = `<button class="cyber-btn" onclick="handleFriendAction('${username}', 'cancel')" style="flex: 1; border-color:var(--text-muted); color:var(--text-muted); padding: 10px 5px;">PENDING_CANCEL</button>`;
       } else if (relData.relation === 'pending' && relData.sender === 'them') {
         relButton = `
           <div style="display:flex; gap:5px; flex:1;">
@@ -42,7 +42,7 @@ async function openProfile(username) {
             <button class="cyber-btn" onclick="handleFriendAction('${username}', 'cancel')" style="flex:1; border-color:var(--neon-pink); color:var(--neon-pink); padding: 10px 2px;">[ DECLINE ]</button>
           </div>`;
       } else if (relData.relation === 'friends') {
-        relButton = `<button class="cyber-btn" onclick="handleFriendAction('${username}', 'cancel')" style="flex: 1; border-color:var(--neon-purple); color:var(--neon-purple); padding: 10px 5px;">[ DISCONNECT_NODE ]</button>`;
+        relButton = `<button class="cyber-btn" onclick="handleFriendAction('${username}', 'cancel')" style="flex: 1; border-color:var(--neon-purple); color:var(--neon-purple); padding: 10px 5px;">DISCONNECT_NODE</button>`;
       } else if (relData.relation === 'blocking') {
         relButton = `<button class="cyber-btn" onclick="handleUnblockAction('${username}')" style="flex: 1; border-color:var(--neon-green); color:var(--neon-green); padding: 10px 5px;">UNBLOCK_NODE</button>`;
       }

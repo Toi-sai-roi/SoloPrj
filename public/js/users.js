@@ -79,15 +79,15 @@ function renderUsersList(filteredUsers = null) {
     } else if (relation === 'pending_received') {
       actionBtnHtml = `
         <div style="display:flex; gap:4px;">
-          <button class="cyber-btn" style="padding:4px 6px; font-size:9px; border-color:var(--neon-green); color:var(--neon-green); min-width:auto; height:auto; line-height:1; font-family:var(--font-tech);" onclick="event.stopPropagation(); handleFriendRequestAction('${user.username}', 'accept')">NHẬN</button>
-          <button class="cyber-btn" style="padding:4px 6px; font-size:9px; border-color:var(--neon-pink); color:var(--neon-pink); min-width:auto; height:auto; line-height:1; font-family:var(--font-tech);" onclick="event.stopPropagation(); handleFriendRequestAction('${user.username}', 'cancel')">TỪ CHỐI</button>
+          <button class="cyber-btn" style="padding:4px 6px; font-size:9px; border-color:var(--neon-green); color:var(--neon-green); min-width:auto; height:auto; line-height:1; font-family:var(--font-tech);" onclick="event.stopPropagation(); handleFriendRequestAction('${user.username}', 'accept')">ACCEPT</button>
+          <button class="cyber-btn" style="padding:4px 6px; font-size:9px; border-color:var(--neon-pink); color:var(--neon-pink); min-width:auto; height:auto; line-height:1; font-family:var(--font-tech);" onclick="event.stopPropagation(); handleFriendRequestAction('${user.username}', 'cancel')">DECLINE</button>
         </div>
       `;
     } else {
       actionBtnHtml = `<button class="cyber-btn cyan-alt" style="padding:4px 8px; font-size:9px; min-width:auto; height:auto; line-height:1; font-family:var(--font-tech);" onclick="event.stopPropagation(); handleFriendRequestAction('${user.username}', 'add')">ADD FRIEND</button>`;
     }
 
-    // Thiết lập布局 flexbox để dồn nút và dấu chấm sang bên phải gọn gàng như trong ảnh cap
+    // Thiết lập flexbox để dồn nút và dấu chấm sang bên phải gọn gàng như trong ảnh cap
     card.style.display = 'flex';
     card.style.alignItems = 'center';
     card.style.justifyContent = 'space-between';
@@ -196,6 +196,15 @@ function filterUsers() {
   const filtered = AppState.usersData.filter(u => u.username.toLowerCase().includes(term));
   renderUsersList(filtered);
 }
+// Search filter
+document.getElementById('search-input').addEventListener('input', function() {
+  const term = this.value.trim().toLowerCase();
+  if (!term) { renderUsersList(); return; }
+  const filtered = AppState.usersData.filter(u =>
+    u.username.toLowerCase().includes(term)
+  );
+  renderUsersList(filtered);
+});
 
 function glowNotification(sender) {
   const dot = document.getElementById(`status-dot-${sender}`);
