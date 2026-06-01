@@ -97,7 +97,7 @@ function renderUsersList(filteredUsers = null) {
         <div class="user-avatar" onclick="event.stopPropagation(); openProfile('${user.username}')">
           ${avatarContent}
         </div>
-        <div class="user-name">${user.username}</div>
+        <div class="user-name" title="${user.username}">${user.username}</div>
       </div>
       
       <div style="display:flex; align-items:center; gap:12px;" onclick="event.stopPropagation();">
@@ -118,18 +118,24 @@ function switchUsersTab(tabName) {
 
   const tabAll = document.getElementById('tab-users-all');
   const tabFriends = document.getElementById('tab-users-friends');
+  const tabGroups = document.getElementById('tab-users-groups');
+  const createGroupBtn = document.getElementById('create-group-btn');
 
-  if (tabAll && tabFriends) {
-    if (tabName === 'all') {
-      tabAll.classList.add('active');
-      tabFriends.classList.remove('active');
-    } else {
-      tabAll.classList.remove('active');
-      tabFriends.classList.add('active');
-    }
+  [tabAll, tabFriends, tabGroups].forEach(t => t && t.classList.remove('active'));
+
+  if (tabName === 'all') {
+    tabAll && tabAll.classList.add('active');
+    if (createGroupBtn) createGroupBtn.style.display = 'none';
+  } else if (tabName === 'friends') {
+    tabFriends && tabFriends.classList.add('active');
+    if (createGroupBtn) createGroupBtn.style.display = 'none';
+  } else if (tabName === 'groups') {
+    tabGroups && tabGroups.classList.add('active');
+    if (createGroupBtn) createGroupBtn.style.display = 'block';
+    loadAndRenderGroups();
+    return;
   }
 
-  // Render trực tiếp, loại bỏ hoàn toàn setInterval bên ngoài
   renderUsersList();
 }
 
@@ -197,7 +203,7 @@ function filterUsers() {
   renderUsersList(filtered);
 }
 // Search filter
-document.getElementById('search-input').addEventListener('input', function() {
+document.getElementById('search-input').addEventListener('input', function () {
   const term = this.value.trim().toLowerCase();
   if (!term) { renderUsersList(); return; }
   const filtered = AppState.usersData.filter(u =>
@@ -205,6 +211,79 @@ document.getElementById('search-input').addEventListener('input', function() {
   );
   renderUsersList(filtered);
 });
+
+// ==========================================
+// GROUP TAB FUNCTIONS
+// ==========================================
+
+async function loadAndRenderGroups() {
+  const container = document.getElementById('users-list-container');
+  const blankState = document.getElementById('users-blank-state');
+  const countEl = document.getElementById('users-count');
+  if (!container) return;
+
+  container.innerHTML = '<div style="padding:20px; text-align:center; color:var(--text-muted); font-family:var(--font-tech); font-size:10px; letter-spacing:1px;">SCANNING CLUSTERS...</div>';
+
+  try {
+    const res = await fetch('/api/groups/my', {
+      headers: { 'Authorization': `Bearer ${AppState.token}` }
+    });
+    if (!res.ok) throw new Error('Failed');
+    const groups = await res.json();
+    AppState.groupsData = groups;
+
+    container.innerHTML = '';
+
+    if (groups.length === 0) {
+      if (blankState) {
+        blankState.style.setProperty('display', 'flex', 'important');
+        const blankText = document.getElementById('blank-state-text');
+        if (blankText) blankText.textContent = 'NO GROUP CLUSTERS DETECTED';
+      }
+      if (countEl) countEl.textContent = '0 GROUPS';
+      return;
+    }
+
+    if (blankState) blankState.style.setProperty('display', 'none', 'important');
+    if (countEl) countEl.textContent = `${groups.length} GROUPS`;
+
+    groups.forEach(group => {
+      const card = document.createElement('div');
+      card.className = 'user-card glass-panel';
+      card.style.display = 'flex';
+      card.style.alignItems = 'center';
+      card.style.justifyContent = 'space-between';
+      card.onclick = () => openGroupChat(group.id);
+
+      const avatarContent = group.avatar
+        ? `<img src="${group.avatar}" style="width:100%;height:100%;border-radius:8px;object-fit:cover;">`
+        : group.name.charAt(0).toUpperCase();
+
+      const lastMsg = group.last_message
+        ? (group.last_message.startsWith('data:') ? '[Media]' : group.last_message.substring(0, 30) + (group.last_message.length > 30 ? '...' : ''))
+        : 'No messages yet';
+
+      card.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div class="user-avatar" style="border-radius:8px;background:linear-gradient(135deg,var(--neon-purple),var(--neon-cyan));display:flex;align-items:center;justify-content:center;">
+            ${avatarContent}
+          </div>
+          <div>
+            <div class="user-name">${escapeHTML(group.name)}</div>
+            <div style="font-size:9px;color:var(--text-muted);font-family:var(--font-tech);margin-top:2px;">${group.member_count} NODES · ${escapeHTML(lastMsg)}</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          ${group.role === 'admin' ? '<span style="font-size:8px;color:var(--neon-purple);font-family:var(--font-tech);border:1px solid var(--neon-purple);padding:2px 5px;border-radius:3px;">ADMIN</span>' : ''}
+        </div>
+      `;
+      container.appendChild(card);
+    });
+  } catch (err) {
+    console.error('Lỗi tải danh sách nhóm:', err);
+    container.innerHTML = '<div style="padding:20px; text-align:center; color:var(--accent-pink); font-family:var(--font-tech); font-size:10px;">FAILED TO LOAD CLUSTERS</div>';
+  }
+}
 
 function glowNotification(sender) {
   const dot = document.getElementById(`status-dot-${sender}`);

@@ -8,7 +8,10 @@ const AppState = {
   token: localStorage.getItem('cyber_token'),
   currentUser: localStorage.getItem('cyber_username'),
   usersData: [],
+  groupsData: [],
   activeChatPartner: null,
+  activeGroup: null,
+  activeGroupData: null,
   ws: null
 };
 
@@ -24,15 +27,19 @@ function initTheme() {
 
 function toggleTheme() {
   const btn = document.getElementById('theme-toggle-btn');
+  const profileBtn = document.getElementById('profile-theme-toggle-btn');
   if (document.body.classList.contains('light-theme')) {
     document.body.classList.remove('light-theme');
     localStorage.setItem('cyber_theme', 'dark');
-    btn.textContent = '🌙';
+    if (btn) btn.textContent = '🌙';
+    if (profileBtn) profileBtn.textContent = '☀️ LIGHT MODE';
   } else {
     document.body.classList.add('light-theme');
     localStorage.setItem('cyber_theme', 'light');
-    btn.textContent = '☀️';
+    if (btn) btn.textContent = '☀️';
+    if (profileBtn) profileBtn.textContent = '🌙 DARK MODE';
   }
+  if (typeof closeProfileModal === 'function') closeProfileModal();
 }
 
 // Khởi động app khi DOM sẵn sàng

@@ -73,6 +73,47 @@ db.exec(`
     FOREIGN KEY (user_two) REFERENCES users(username),
     UNIQUE(user_one, user_two)       
   );
+
+  CREATE TABLE IF NOT EXISTS groups (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    avatar      TEXT DEFAULT '',
+    description TEXT DEFAULT '',
+    created_by  TEXT NOT NULL,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES users(username)
+  );
+
+  CREATE TABLE IF NOT EXISTS group_members (
+    group_id    INTEGER NOT NULL,
+    username    TEXT NOT NULL,
+    role        TEXT DEFAULT 'member',
+    joined_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+    FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE,
+    PRIMARY KEY (group_id, username)
+  );
+
+  CREATE TABLE IF NOT EXISTS group_messages (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id    INTEGER NOT NULL,
+    sender      TEXT NOT NULL,
+    text        TEXT NOT NULL,
+    timestamp   DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+    FOREIGN KEY (sender) REFERENCES users(username)
+  );
+
+  CREATE TABLE IF NOT EXISTS group_reactions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id INTEGER NOT NULL,
+    username   TEXT NOT NULL,
+    emoji      TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (message_id) REFERENCES group_messages(id) ON DELETE CASCADE,
+    FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE,
+    UNIQUE(message_id, username)
+  );
 `);
 
 console.log('✅ SQLite database initialized:', DB_PATH);
@@ -221,7 +262,7 @@ const server = http.createServer(async (req, res) => {
       const { username, password } = await getPostBody(req);
       if (!username || !password) return sendJSON(res, 400, { error: 'Username và password không được để trống' });
       const clean = username.trim().toLowerCase();
-      if (clean.length < 3 || clean.length > 20) return sendJSON(res, 400, { error: 'Username phải từ 3 đến 20 ký tự' });
+      if (clean.length < 2 || clean.length > 30) return sendJSON(res, 400, { error: 'Username phải từ 2 đến 30 ký tự' });
       if (db.prepare('SELECT 1 FROM users WHERE username = ?').get(clean)) return sendJSON(res, 400, { error: 'Tên đăng nhập đã được sử dụng' });
       const salt = generateSalt();
       const hash = hashPassword(password, salt);
@@ -454,6 +495,238 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  // ==========================================
+  // GROUP API ENDPOINTS
+  // ==========================================
+
+  // POST /api/groups/create - Tạo nhóm mới
+  if (pathname === '/api/groups/create' && req.method === 'POST') {
+    const payload = authenticateToken(req);
+    if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
+    try {
+      const me = payload.username;
+      const { name, description, avatar, members } = await getPostBody(req);
+      if (!name || !name.trim()) return sendJSON(res, 400, { error: 'Tên nhóm không được để trống' });
+
+      updateLastSeen(me);
+      const info = db.prepare(`INSERT INTO groups (name, avatar, description, created_by) VALUES (?, ?, ?, ?)`).run(name.trim(), avatar || '', description || '', me);
+      const groupId = info.lastInsertRowid;
+
+      // Thêm creator vào group với role admin
+      db.prepare(`INSERT INTO group_members (group_id, username, role) VALUES (?, ?, 'admin')`).run(groupId, me);
+
+      // Thêm các members được mời
+      const invitedMembers = Array.isArray(members) ? members.filter(u => u !== me) : [];
+      for (const username of invitedMembers) {
+        const userExists = db.prepare('SELECT 1 FROM users WHERE username = ?').get(username);
+        if (userExists) {
+          db.prepare(`INSERT OR IGNORE INTO group_members (group_id, username, role) VALUES (?, ?, 'member')`).run(groupId, username);
+          // Thông báo qua WS
+          broadcastToUser(username, { type: 'group_invite', groupId, groupName: name.trim(), invitedBy: me });
+        }
+      }
+
+      return sendJSON(res, 201, { success: true, groupId, name: name.trim() });
+    } catch (err) {
+      console.error('❌ Lỗi tạo nhóm:', err.message);
+      return sendJSON(res, 500, { error: 'Lỗi máy chủ' });
+    }
+  }
+
+  // GET /api/groups/my - Danh sách nhóm của user
+  if (pathname === '/api/groups/my' && req.method === 'GET') {
+    const payload = authenticateToken(req);
+    if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
+    try {
+      const me = payload.username;
+      const groups = db.prepare(`
+        SELECT g.id, g.name, g.avatar, g.description, g.created_by, g.created_at,
+          (SELECT COUNT(*) FROM group_members WHERE group_id = g.id) as member_count,
+          (SELECT text FROM group_messages WHERE group_id = g.id ORDER BY timestamp DESC LIMIT 1) as last_message,
+          (SELECT timestamp FROM group_messages WHERE group_id = g.id ORDER BY timestamp DESC LIMIT 1) as last_message_time,
+          gm.role
+        FROM groups g
+        INNER JOIN group_members gm ON g.id = gm.group_id AND gm.username = ?
+        ORDER BY last_message_time DESC, g.created_at DESC
+      `).all(me);
+      return sendJSON(res, 200, groups);
+    } catch (err) {
+      return sendJSON(res, 500, { error: 'Lỗi máy chủ' });
+    }
+  }
+
+  // GET /api/groups/:id - Chi tiết nhóm
+  if (pathname.match(/^\/api\/groups\/\d+$/) && req.method === 'GET') {
+    const payload = authenticateToken(req);
+    if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
+    try {
+      const me = payload.username;
+      const groupId = parseInt(pathname.split('/').pop());
+      const isMember = db.prepare('SELECT role FROM group_members WHERE group_id = ? AND username = ?').get(groupId, me);
+      if (!isMember) return sendJSON(res, 403, { error: 'Bạn không phải thành viên nhóm này' });
+
+      const group = db.prepare('SELECT * FROM groups WHERE id = ?').get(groupId);
+      if (!group) return sendJSON(res, 404, { error: 'Nhóm không tồn tại' });
+
+      const members = db.prepare(`
+        SELECT gm.username, gm.role, gm.joined_at, u.avatar
+        FROM group_members gm
+        LEFT JOIN users u ON gm.username = u.username
+        WHERE gm.group_id = ?
+        ORDER BY gm.role DESC, gm.joined_at ASC
+      `).all(groupId);
+
+      return sendJSON(res, 200, { ...group, members, myRole: isMember.role });
+    } catch (err) {
+      return sendJSON(res, 500, { error: 'Lỗi máy chủ' });
+    }
+  }
+
+  // PUT /api/groups/:id - Cập nhật thông tin nhóm (chỉ admin)
+  if (pathname.match(/^\/api\/groups\/\d+$/) && req.method === 'PUT') {
+    const payload = authenticateToken(req);
+    if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
+    try {
+      const me = payload.username;
+      const groupId = parseInt(pathname.split('/').pop());
+      const member = db.prepare('SELECT role FROM group_members WHERE group_id = ? AND username = ?').get(groupId, me);
+      if (!member || member.role !== 'admin') return sendJSON(res, 403, { error: 'Chỉ admin mới có thể sửa nhóm' });
+
+      const { name, description, avatar } = await getPostBody(req);
+      if (name) db.prepare('UPDATE groups SET name = ? WHERE id = ?').run(name.trim(), groupId);
+      if (description !== undefined) db.prepare('UPDATE groups SET description = ? WHERE id = ?').run(description, groupId);
+      if (avatar !== undefined) db.prepare('UPDATE groups SET avatar = ? WHERE id = ?').run(avatar, groupId);
+
+      // Broadcast update cho toàn bộ thành viên online
+      const allMembers = db.prepare('SELECT username FROM group_members WHERE group_id = ?').all(groupId);
+      const updatedGroup = db.prepare('SELECT * FROM groups WHERE id = ?').get(groupId);
+      allMembers.forEach(m => broadcastToUser(m.username, { type: 'group_updated', group: updatedGroup }));
+
+      return sendJSON(res, 200, { success: true });
+    } catch (err) {
+      return sendJSON(res, 500, { error: 'Lỗi máy chủ' });
+    }
+  }
+
+  // POST /api/groups/:id/invite - Mời thành viên
+  if (pathname.match(/^\/api\/groups\/\d+\/invite$/) && req.method === 'POST') {
+    const payload = authenticateToken(req);
+    if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
+    try {
+      const me = payload.username;
+      const groupId = parseInt(pathname.split('/')[3]);
+      const isMember = db.prepare('SELECT 1 FROM group_members WHERE group_id = ? AND username = ?').get(groupId, me);
+      if (!isMember) return sendJSON(res, 403, { error: 'Bạn không phải thành viên nhóm này' });
+
+      const { username } = await getPostBody(req);
+      if (!username) return sendJSON(res, 400, { error: 'Thiếu username' });
+
+      const userExists = db.prepare('SELECT 1 FROM users WHERE username = ?').get(username);
+      if (!userExists) return sendJSON(res, 404, { error: 'User không tồn tại' });
+
+      const alreadyMember = db.prepare('SELECT 1 FROM group_members WHERE group_id = ? AND username = ?').get(groupId, username);
+      if (alreadyMember) return sendJSON(res, 400, { error: 'User đã là thành viên' });
+
+      db.prepare(`INSERT INTO group_members (group_id, username, role) VALUES (?, ?, 'member')`).run(groupId, username);
+      const group = db.prepare('SELECT name FROM groups WHERE id = ?').get(groupId);
+      broadcastToUser(username, { type: 'group_invite', groupId, groupName: group.name, invitedBy: me });
+
+      // Thông báo cho cả nhóm có thành viên mới
+      const allMembers = db.prepare('SELECT username FROM group_members WHERE group_id = ?').all(groupId);
+      allMembers.forEach(m => {
+        if (m.username !== username) broadcastToUser(m.username, { type: 'group_member_joined', groupId, username });
+      });
+
+      return sendJSON(res, 200, { success: true });
+    } catch (err) {
+      return sendJSON(res, 500, { error: 'Lỗi máy chủ' });
+    }
+  }
+
+  // DELETE /api/groups/:id/members/:username - Kick thành viên (chỉ admin)
+  if (pathname.match(/^\/api\/groups\/\d+\/members\/.+$/) && req.method === 'DELETE') {
+    const payload = authenticateToken(req);
+    if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
+    try {
+      const me = payload.username;
+      const parts = pathname.split('/');
+      const groupId = parseInt(parts[3]);
+      const targetUsername = decodeURIComponent(parts[5]);
+
+      const myRole = db.prepare('SELECT role FROM group_members WHERE group_id = ? AND username = ?').get(groupId, me);
+      if (!myRole || myRole.role !== 'admin') return sendJSON(res, 403, { error: 'Chỉ admin mới có thể kick' });
+      if (targetUsername === me) return sendJSON(res, 400, { error: 'Không thể kick chính mình' });
+
+      db.prepare('DELETE FROM group_members WHERE group_id = ? AND username = ?').run(groupId, targetUsername);
+
+      // Thông báo bị kick
+      broadcastToUser(targetUsername, { type: 'group_kicked', groupId });
+      const allMembers = db.prepare('SELECT username FROM group_members WHERE group_id = ?').all(groupId);
+      allMembers.forEach(m => broadcastToUser(m.username, { type: 'group_member_left', groupId, username: targetUsername }));
+
+      return sendJSON(res, 200, { success: true });
+    } catch (err) {
+      return sendJSON(res, 500, { error: 'Lỗi máy chủ' });
+    }
+  }
+
+  // DELETE /api/groups/:id/leave - Rời nhóm
+  if (pathname.match(/^\/api\/groups\/\d+\/leave$/) && req.method === 'DELETE') {
+    const payload = authenticateToken(req);
+    if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
+    try {
+      const me = payload.username;
+      const groupId = parseInt(pathname.split('/')[3]);
+
+      const myRole = db.prepare('SELECT role FROM group_members WHERE group_id = ? AND username = ?').get(groupId, me);
+      if (!myRole) return sendJSON(res, 400, { error: 'Bạn không trong nhóm này' });
+
+      // Nếu admin và còn người khác → chuyển quyền cho người đầu tiên
+      if (myRole.role === 'admin') {
+        const nextMember = db.prepare(`SELECT username FROM group_members WHERE group_id = ? AND username != ? LIMIT 1`).get(groupId, me);
+        if (nextMember) {
+          db.prepare(`UPDATE group_members SET role = 'admin' WHERE group_id = ? AND username = ?`).run(groupId, nextMember.username);
+          broadcastToUser(nextMember.username, { type: 'group_promoted', groupId });
+        } else {
+          // Không còn ai → xóa nhóm luôn
+          db.prepare('DELETE FROM groups WHERE id = ?').run(groupId);
+          return sendJSON(res, 200, { success: true, groupDeleted: true });
+        }
+      }
+
+      db.prepare('DELETE FROM group_members WHERE group_id = ? AND username = ?').run(groupId, me);
+      const allMembers = db.prepare('SELECT username FROM group_members WHERE group_id = ?').all(groupId);
+      allMembers.forEach(m => broadcastToUser(m.username, { type: 'group_member_left', groupId, username: me }));
+
+      return sendJSON(res, 200, { success: true });
+    } catch (err) {
+      return sendJSON(res, 500, { error: 'Lỗi máy chủ' });
+    }
+  }
+
+  // DELETE /api/groups/:id - Xóa nhóm (chỉ creator/admin)
+  if (pathname.match(/^\/api\/groups\/\d+$/) && req.method === 'DELETE') {
+    const payload = authenticateToken(req);
+    if (!payload) return sendJSON(res, 401, { error: 'Unauthorized' });
+    try {
+      const me = payload.username;
+      const groupId = parseInt(pathname.split('/').pop());
+      const group = db.prepare('SELECT created_by FROM groups WHERE id = ?').get(groupId);
+      if (!group) return sendJSON(res, 404, { error: 'Nhóm không tồn tại' });
+      if (group.created_by !== me) return sendJSON(res, 403, { error: 'Chỉ người tạo nhóm mới có thể xóa' });
+
+      const allMembers = db.prepare('SELECT username FROM group_members WHERE group_id = ?').all(groupId);
+      db.prepare('DELETE FROM groups WHERE id = ?').run(groupId);
+      allMembers.forEach(m => {
+        if (m.username !== me) broadcastToUser(m.username, { type: 'group_deleted', groupId });
+      });
+
+      return sendJSON(res, 200, { success: true });
+    } catch (err) {
+      return sendJSON(res, 500, { error: 'Lỗi máy chủ' });
+    }
+  }
+
   // Static file server ở cuối cùng
   if (req.method === 'GET') return serveStatic(req, res);
   sendJSON(res, 404, { error: 'Không tìm thấy' });
@@ -616,6 +889,99 @@ wss.on('connection', (wsConn, request, username) => {
           onlineUsers.get(to).forEach(c => { if (c.readyState === ws.OPEN) c.send(JSON.stringify(chatMsg)); });
         }
         wsConn.send(JSON.stringify({ ...chatMsg, self: true }));
+        return;
+      }
+
+      // ==========================================
+      // GROUP WEBSOCKET HANDLERS
+      // ==========================================
+
+      if (data.type === 'send_group_message') {
+        const { groupId, text } = data;
+        if (!groupId || !text?.trim()) return;
+
+        const isMember = db.prepare('SELECT 1 FROM group_members WHERE group_id = ? AND username = ?').get(groupId, username);
+        if (!isMember) return wsConn.send(JSON.stringify({ type: 'system', text: '[ SYSTEM // ACCESS_DENIED: Bạn không phải thành viên nhóm này ]' }));
+
+        const cleanText = text.trim();
+        const info = db.prepare(`INSERT INTO group_messages (group_id, sender, text) VALUES (?, ?, ?)`).run(groupId, username, cleanText);
+        const msg = {
+          type: 'group_message',
+          id: Number(info.lastInsertRowid),
+          groupId,
+          sender: username,
+          text: cleanText,
+          timestamp: new Date().toISOString()
+        };
+
+        // Broadcast tới tất cả thành viên online trong nhóm
+        const members = db.prepare('SELECT username FROM group_members WHERE group_id = ?').all(groupId);
+        members.forEach(m => {
+          if (m.username === username) {
+            wsConn.send(JSON.stringify({ ...msg, self: true }));
+          } else {
+            broadcastToUser(m.username, msg);
+          }
+        });
+        return;
+      }
+
+      if (data.type === 'get_group_history') {
+        const { groupId } = data;
+        if (!groupId) return;
+
+        const isMember = db.prepare('SELECT 1 FROM group_members WHERE group_id = ? AND username = ?').get(groupId, username);
+        if (!isMember) return;
+
+        const messages = db.prepare(`
+          SELECT gm.id, gm.group_id, gm.sender, gm.text, gm.timestamp,
+            COALESCE((SELECT json_group_object(gr.username, gr.emoji) FROM group_reactions gr WHERE gr.message_id = gm.id), '{}') as reactions
+          FROM group_messages gm
+          WHERE gm.group_id = ?
+          ORDER BY gm.timestamp ASC
+        `).all(groupId);
+
+        wsConn.send(JSON.stringify({ type: 'group_history', groupId, messages }));
+        return;
+      }
+
+      if (data.type === 'group_typing') {
+        const { groupId, isTyping } = data;
+        if (!groupId) return;
+
+        const isMember = db.prepare('SELECT 1 FROM group_members WHERE group_id = ? AND username = ?').get(groupId, username);
+        if (!isMember) return;
+
+        const members = db.prepare('SELECT username FROM group_members WHERE group_id = ?').all(groupId);
+        members.forEach(m => {
+          if (m.username !== username) {
+            broadcastToUser(m.username, { type: 'group_typing', groupId, sender: username, isTyping });
+          }
+        });
+        return;
+      }
+
+      if (data.type === 'group_reaction') {
+        const { messageId, emoji } = data;
+        if (!messageId || !emoji) return;
+
+        const msg = db.prepare('SELECT group_id FROM group_messages WHERE id = ?').get(messageId);
+        if (!msg) return;
+
+        const isMember = db.prepare('SELECT 1 FROM group_members WHERE group_id = ? AND username = ?').get(msg.group_id, username);
+        if (!isMember) return;
+
+        db.prepare(`INSERT INTO group_reactions (message_id, username, emoji) VALUES (?, ?, ?)
+          ON CONFLICT(message_id, username) DO UPDATE SET emoji = ?, created_at = CURRENT_TIMESTAMP`).run(messageId, username, emoji, emoji);
+
+        const reactions = db.prepare(`SELECT username, emoji FROM group_reactions WHERE message_id = ?`).all(messageId);
+        const reactionMap = {};
+        reactions.forEach(r => { reactionMap[r.username] = r.emoji; });
+
+        const members = db.prepare('SELECT username FROM group_members WHERE group_id = ?').all(msg.group_id);
+        members.forEach(m => {
+          broadcastToUser(m.username, { type: 'group_reaction_update', messageId, groupId: msg.group_id, reactions: reactionMap });
+        });
         return;
       }
     } catch (err) {

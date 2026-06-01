@@ -217,6 +217,108 @@ function initWebSocket() {
           }
           break;
         }
+
+        case 'group_history': {
+          if (AppState.activeGroup === data.groupId) {
+            const area = document.getElementById('group-messages-area');
+            if (area) {
+              area.innerHTML = '';
+              data.messages.forEach(msg => appendGroupMessage(msg));
+              area.scrollTop = area.scrollHeight;
+            }
+          }
+          break;
+        }
+
+        case 'group_message': {
+          if (AppState.activeGroup === data.groupId) {
+            appendGroupMessage(data);
+          } else {
+            // Notification nếu đang không ở nhóm đó
+            if (typeof loadAndRenderGroups === 'function' && AppState.currentUsersTab === 'groups') {
+              loadAndRenderGroups();
+            }
+          }
+          break;
+        }
+
+        case 'group_typing': {
+          if (AppState.activeGroup === data.groupId) {
+            const indicator = document.getElementById('group-typing-indicator');
+            if (indicator) {
+              if (data.isTyping) {
+                indicator.textContent = `${data.sender.toUpperCase()} ĐANG GÕ...`;
+                indicator.style.display = 'block';
+                if (window.groupTypingHideTimeout) clearTimeout(window.groupTypingHideTimeout);
+                window.groupTypingHideTimeout = setTimeout(() => { indicator.style.display = 'none'; }, 3000);
+              } else {
+                indicator.style.display = 'none';
+              }
+            }
+          }
+          break;
+        }
+
+        case 'group_reaction_update': {
+          if (AppState.activeGroup === data.groupId) {
+            updateGroupMessageReaction(data.messageId, data.reactions);
+          }
+          break;
+        }
+
+        case 'group_invite': {
+          // Nhận được lời mời vào nhóm
+          if (confirm(`Bạn được mời vào nhóm "${data.groupName}" bởi ${data.invitedBy}. Mở chat nhóm ngay?`)) {
+            openGroupChat(data.groupId);
+          }
+          // Reload groups tab nếu đang xem
+          if (AppState.currentUsersTab === 'groups' && typeof loadAndRenderGroups === 'function') {
+            loadAndRenderGroups();
+          }
+          break;
+        }
+
+        case 'group_kicked': {
+          if (AppState.activeGroup === data.groupId) {
+            alert('Bạn đã bị kick khỏi nhóm này.');
+            exitGroupChat();
+          }
+          if (AppState.currentUsersTab === 'groups' && typeof loadAndRenderGroups === 'function') {
+            loadAndRenderGroups();
+          }
+          break;
+        }
+
+        case 'group_deleted': {
+          if (AppState.activeGroup === data.groupId) {
+            alert('Nhóm này đã bị xóa bởi creator.');
+            exitGroupChat();
+          }
+          if (AppState.currentUsersTab === 'groups' && typeof loadAndRenderGroups === 'function') {
+            loadAndRenderGroups();
+          }
+          break;
+        }
+
+        case 'group_member_joined':
+        case 'group_member_left':
+        case 'group_updated': {
+          // Cập nhật thông tin nhóm đang mở
+          if (AppState.activeGroup === data.groupId) {
+            const metaEl = document.getElementById('group-chat-meta');
+            // Reload group data nhẹ nhàng
+            fetch(`/api/groups/${data.groupId}`, {
+              headers: { 'Authorization': `Bearer ${AppState.token}` }
+            }).then(r => r.json()).then(group => {
+              if (metaEl) metaEl.textContent = `${group.members.length} NODES`;
+              AppState.activeGroupData = group;
+            }).catch(() => {});
+          }
+          if (AppState.currentUsersTab === 'groups' && typeof loadAndRenderGroups === 'function') {
+            loadAndRenderGroups();
+          }
+          break;
+        }
       }
     } catch (err) {
       console.error('[WS Message Error]', err);

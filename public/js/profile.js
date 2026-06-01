@@ -76,7 +76,8 @@ async function openProfile(username) {
               <span>📅 JOINED: ${new Date(profileData.created_at).toLocaleDateString('vi-VN')}</span>
               <span style="color:${profileData.isBlockedReal ? 'var(--text-muted)' : 'var(--neon-green)'}">● ${profileData.lastSeenText.toUpperCase()}</span>
             </div>
-            ${isMe ? `<button class="cyber-btn" onclick="saveProfileBio()" style="width:100%; margin-top:10px; padding:10px;">LƯU THÔNG TIN PROFILE</button>` : ''}
+            ${isMe ? `<button class="cyber-btn" onclick="saveProfileBio()" style="width:100%; margin-top:10px; padding:10px;">LƯU THÔNG TIN PROFILE</button>
+            <button class="cyber-btn" id="profile-theme-toggle-btn" onclick="toggleTheme()" style="width:100%; margin-top:8px; padding:10px; border-color:var(--text-muted); color:var(--text-muted); font-size:10px;">${document.body.classList.contains('light-theme') ? '🌙 DARK MODE' : '☀️ LIGHT MODE'}</button>` : ''}
           </div>
         </div>
       </div>`;

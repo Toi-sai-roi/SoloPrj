@@ -1,5 +1,5 @@
 /* ============================================================
-   CYBERPUNK // ROOMS — REDESIGN v3.0
+   CYBERPUNK // ROOMS — REDESIGN v6.0 - GỐC
    ============================================================ */
 
 /* ── 1. DESIGN TOKENS ───────────────────────────────────────── */
@@ -70,7 +70,6 @@ body {
   background-repeat: no-repeat;
 }
 
-/* overlay — mỏng thôi để bg sáng */
 body::before {
   content: '';
   position: fixed; inset: 0;
@@ -142,6 +141,30 @@ h1, h2, h3, button { font-family: var(--font-tech); letter-spacing: 0.08em; }
 .btn-add-friend.is-friend { border-color: var(--accent-pink); color: var(--accent-pink); }
 .btn-add-friend.is-friend:hover { background: rgba(255,45,120,0.12); box-shadow: var(--glow-pink); }
 
+.cyber-btn, .btn-add-friend {
+  clip-path: polygon(
+    0 0,
+    calc(100% - 7px) 0,
+    100% 7px,
+    100% 100%,
+    7px 100%,
+    0 calc(100% - 7px)
+  );
+  border-radius: 0 !important;
+}
+
+.user-avatar {
+  clip-path: polygon(
+    0 0,
+    calc(100% - 8px) 0,
+    100% 8px,
+    100% 100%,
+    8px 100%,
+    0 calc(100% - 8px)
+  );
+  border-radius: 0 !important;
+}
+
 /* ── 7. CYBER INPUT ─────────────────────────────────────────── */
 .cyber-input {
   background: var(--bg-input);
@@ -192,10 +215,6 @@ h1, h2, h3, button { font-family: var(--font-tech); letter-spacing: 0.08em; }
 /* ── 11. AUTH SCREEN ────────────────────────────────────────── */
 #auth-screen { justify-content: center; align-items: center; }
 
-/* 
-  Auth panel: chamfered corners bằng wrapper technique
-  Wrapper có clip-path, element con không bị ảnh hưởng
-*/
 .auth-container {
   width: 90%; max-width: 420px;
   padding: 44px 36px 36px;
@@ -204,7 +223,6 @@ h1, h2, h3, button { font-family: var(--font-tech); letter-spacing: 0.08em; }
   -webkit-backdrop-filter: blur(14px);
   border-radius: var(--radius-panel);
   position: relative;
-  /* Double border via outline + border */
   border: 2px solid rgba(255,45,120,0.55);
   box-shadow:
     0 0 0 1px rgba(255,45,120,0.18),
@@ -212,7 +230,6 @@ h1, h2, h3, button { font-family: var(--font-tech); letter-spacing: 0.08em; }
     inset 0 0 0 1px rgba(255,45,120,0.10),
     0 24px 80px rgba(0,0,0,0.65);
 }
-/* Corner cyan brackets via pseudo */
 .auth-container::before {
   content: '';
   position: absolute; inset: -2px;
@@ -312,75 +329,55 @@ h1, h2, h3, button { font-family: var(--font-tech); letter-spacing: 0.08em; }
 
 .main-layout { flex: 1; display: flex; overflow: hidden; position: relative; }
 
-/* ── 13. USERS PANEL — Cyberpunk border đúng kỹ thuật ──────── */
-/*
-  Technique: wrapper div có border + box-shadow thật.
-  Dùng ::before để overlay corner brackets cyan lên trên.
-  KHÔNG dùng clip-path trên element chính (sẽ clip mất box-shadow).
-  Chamfer corner được simulate bằng border-radius + corner bracket overlay.
-*/
+/* ── 13. USERS PANEL ────────────────────────────────────────── */
 .users-panel {
   width: 100%; max-width: 880px;
   margin: 24px auto;
   height: calc(100% - 48px);
   display: flex; flex-direction: column;
   padding: 28px;
-
   background: var(--bg-panel);
   backdrop-filter: blur(10px) saturate(1.2);
   -webkit-backdrop-filter: blur(10px) saturate(1.2);
-
-  /* DOUBLE BORDER SYSTEM:
-     - border chính: 2px solid pink neon
-     - box-shadow: outer glow + outer halo line + inner line + inner glow
-  */
   border: 2px solid var(--accent-pink);
   border-radius: var(--radius-panel);
   box-shadow:
-    0 0 0 1px rgba(255,45,120,0.20),        /* outer halo */
-    0 0 20px rgba(255,45,120,0.25),          /* outer glow */
-    0 0 40px rgba(255,45,120,0.08),          /* wide ambient */
-    inset 0 0 0 1px rgba(255,45,120,0.12),   /* inner line */
-    inset 0 0 16px rgba(255,45,120,0.04),    /* inner glow */
+    0 0 0 1px rgba(255,45,120,0.20),
+    0 0 20px rgba(255,45,120,0.25),
+    0 0 40px rgba(255,45,120,0.08),
+    inset 0 0 0 1px rgba(255,45,120,0.12),
+    inset 0 0 16px rgba(255,45,120,0.04),
     0 20px 60px rgba(0,0,0,0.50);
-
   position: relative;
-  overflow: visible; /* KHÔNG clip! */
+  overflow: visible;
 }
 
-/* Corner brackets cyan — absolute positioned, không ảnh hưởng layout */
 .users-panel::before {
   content: '';
   position: absolute;
-  /* Ngồi sát ngoài border 2px của panel */
   inset: -4px;
   pointer-events: none;
   z-index: 10;
   border-radius: calc(var(--radius-panel) + 2px);
-
-  /* 8 gradient tạo 4 góc bracket vuông — mỗi góc 2 lines: ngang + dọc */
   background-image:
-    /* top-left ngang */   linear-gradient(to right, var(--accent-cyan) 20px, transparent 20px),
-    /* top-left dọc */     linear-gradient(to bottom, var(--accent-cyan) 20px, transparent 20px),
-    /* top-right ngang */  linear-gradient(to left,  var(--accent-cyan) 20px, transparent 20px),
-    /* top-right dọc */    linear-gradient(to bottom, var(--accent-cyan) 20px, transparent 20px),
-    /* bot-left ngang */   linear-gradient(to right, var(--accent-cyan) 20px, transparent 20px),
-    /* bot-left dọc */     linear-gradient(to top,   var(--accent-cyan) 20px, transparent 20px),
-    /* bot-right ngang */  linear-gradient(to left,  var(--accent-cyan) 20px, transparent 20px),
-    /* bot-right dọc */    linear-gradient(to top,   var(--accent-cyan) 20px, transparent 20px);
-
+    linear-gradient(to right, var(--accent-cyan) 20px, transparent 20px),
+    linear-gradient(to bottom, var(--accent-cyan) 20px, transparent 20px),
+    linear-gradient(to left,  var(--accent-cyan) 20px, transparent 20px),
+    linear-gradient(to bottom, var(--accent-cyan) 20px, transparent 20px),
+    linear-gradient(to right, var(--accent-cyan) 20px, transparent 20px),
+    linear-gradient(to top,   var(--accent-cyan) 20px, transparent 20px),
+    linear-gradient(to left,  var(--accent-cyan) 20px, transparent 20px),
+    linear-gradient(to top,   var(--accent-cyan) 20px, transparent 20px);
   background-size:
     20px 2px, 2px 20px,
     20px 2px, 2px 20px,
     20px 2px, 2px 20px,
     20px 2px, 2px 20px;
-
   background-position:
-    0    0,    0    0,     /* top-left */
-    100% 0,    100% 0,    /* top-right */
-    0    100%, 0    100%, /* bot-left */
-    100% 100%, 100% 100%; /* bot-right */
-
+    0    0,    0    0,
+    100% 0,    100% 0,
+    0    100%, 0    100%,
+    100% 100%, 100% 100%;
   background-repeat: no-repeat;
   filter: drop-shadow(0 0 4px rgba(0,212,255,0.8));
   opacity: 0.9;
@@ -450,13 +447,23 @@ body.light-theme .search-container .cyber-input:focus { border-color: var(--acce
   gap: 10px;
   transition: border-color var(--t-med), box-shadow var(--t-med), transform var(--t-med), background var(--t-med);
   border: 1px solid var(--border-card);
-  border-radius: var(--radius-card);
   background: var(--bg-card);
   backdrop-filter: blur(6px);
   position: relative;
-  overflow: visible; /* không clip shadow */
+  overflow: hidden;
   grid-template-columns: unset !important;
+  clip-path: polygon(
+    0 0,
+    calc(100% - 10px) 0,
+    100% 10px,
+    100% 100%,
+    10px 100%,
+    0 calc(100% - 10px)
+  );
+  border-radius: 0 !important;
 }
+
+/* gradient overlay */
 .user-card::before {
   content: ''; position: absolute; inset: 0; border-radius: inherit;
   background: linear-gradient(135deg, rgba(0,212,255,0.05) 0%, transparent 60%);
@@ -464,13 +471,29 @@ body.light-theme .search-container .cyber-input:focus { border-color: var(--acce
   z-index: 0;
 }
 .user-card > * { position: relative; z-index: 1; }
+
+/* corner accent lines — cyan top-left, pink bottom-right */
+.user-card::after {
+  content: '';
+  position: absolute; inset: 0;
+  pointer-events: none; z-index: 3;
+  background-image:
+    linear-gradient(to right, var(--accent-cyan) 14px, transparent 14px),
+    linear-gradient(to bottom, var(--accent-cyan) 14px, transparent 14px),
+    linear-gradient(to left, var(--accent-pink) 14px, transparent 14px),
+    linear-gradient(to top, var(--accent-pink) 14px, transparent 14px);
+  background-size: 14px 1px, 1px 14px, 14px 1px, 1px 14px;
+  background-position: 0 0, 0 0, 100% 100%, 100% 100%;
+  background-repeat: no-repeat;
+  opacity: 0;
+  transition: opacity var(--t-med);
+}
+
+.user-card:hover::before { opacity: 1; }
+.user-card:hover::after  { opacity: 1; }
 .user-card:hover {
   border-color: var(--border-card-hover);
-  box-shadow: 0 0 0 1px rgba(0,212,255,0.25), 0 6px 20px rgba(0,0,0,0.35);
-  transform: translateY(-2px);
-  background: var(--bg-card);
 }
-.user-card:hover::before { opacity: 1; }
 
 .user-card-info {
   display: flex !important;
@@ -486,24 +509,32 @@ body.light-theme .search-container .cyber-input:focus { border-color: var(--acce
 
 .user-avatar {
   width: 52px !important; height: 52px !important;
-  border-radius: var(--radius-avatar);
+  min-width: 52px !important;
+  border-radius: 0 !important;
   background: linear-gradient(135deg, rgba(255,45,120,0.25), rgba(0,212,255,0.25));
   border: 1px solid var(--border-card);
   display: flex; justify-content: center; align-items: center;
   font-family: var(--font-tech); font-size: 16px; font-weight: 800;
   color: var(--text-main); text-transform: uppercase;
   flex-shrink: 0; overflow: hidden; position: relative;
+  clip-path: polygon(
+    0 0,
+    calc(100% - 8px) 0,
+    100% 8px,
+    100% 100%,
+    8px 100%,
+    0 calc(100% - 8px)
+  );
 }
-.user-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+.user-avatar img { width: 100%; height: 100%; object-fit: cover; }
 
 .user-name {
   font-family: var(--font-tech); font-size: 11px; font-weight: 700;
   letter-spacing: 0.12em; color: var(--text-main); text-transform: uppercase;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px;
   min-width: 0;
 }
 
-/* Right side of card — action + dot */
 .user-card > div:last-child {
   display: flex !important;
   align-items: center !important;
@@ -511,14 +542,12 @@ body.light-theme .search-container .cyber-input:focus { border-color: var(--acce
   flex-shrink: 0;
 }
 
-/* Override JS inline styles on card */
 .user-card { display: flex !important; }
 
-/* Buttons inside card */
 .user-card .cyber-btn {
   padding: 5px 10px !important; font-size: 9px !important;
-  border-radius: var(--radius-btn) !important;
-  clip-path: none !important; min-width: unset !important;
+  clip-path: polygon(0 0, calc(100% - 5px) 0, 100% 5px, 100% 100%, 5px 100%, 0 calc(100% - 5px)) !important;
+  border-radius: 0 !important; min-width: unset !important;
   height: auto !important; line-height: 1.2 !important;
 }
 .user-card .cyber-network-action-area {
@@ -815,8 +844,6 @@ body.light-theme .search-container .cyber-input:focus { border-color: var(--acce
   }
 }
 
-/* Card dạng dọc — avatar trên, tên + nút phía dưới
-   Áp dụng từ 768px trở xuống để tên luôn hiện đủ */
 @media (max-width: 768px) {
   .user-card {
     flex-direction: column !important;
@@ -832,7 +859,7 @@ body.light-theme .search-container .cyber-input:focus { border-color: var(--acce
     gap: 8px !important;
   }
   .user-avatar {
-    width: 38px !important; height: 38px !important;
+    width: 38px !important; height: 38px !important; min-width: 38px !important;
     font-size: 13px !important; flex-shrink: 0 !important;
   }
   .user-name {
@@ -843,7 +870,6 @@ body.light-theme .search-container .cyber-input:focus { border-color: var(--acce
     flex: 1 !important;
     min-width: 0 !important;
   }
-  /* Bottom row: nút + dot nằm cạnh nhau */
   .user-card > div:last-child {
     width: 100%;
     display: flex !important;
@@ -1013,9 +1039,250 @@ body.light-theme .self  .chat-media-img { border-color: rgba(232,0,106,0.45); }
 body.light-theme .other .chat-media-img { border-color: rgba(0,125,184,0.45); }
 body.light-theme #media-preview-container { border-color: var(--border-card) !important; background: var(--bg-card) !important; }
 
-/* light theme compat */
 body.light-theme {
   --neon-pink:  var(--accent-pink);
   --neon-cyan:  var(--accent-cyan);
   --neon-green: var(--accent-green);
+}
+
+/* ==========================================
+   GROUP CHAT — V6 STYLES
+   ========================================== */
+#group-chat-screen .chat-container { display: flex; flex-direction: column; height: 100vh; }
+
+#group-chat-avatar {
+  width: 36px; height: 36px; border-radius: 8px;
+  background: linear-gradient(135deg, var(--neon-purple), var(--neon-cyan));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: bold; flex-shrink: 0; overflow: hidden;
+}
+
+#group-typing-indicator {
+  color: var(--accent-cyan); font-family: var(--font-tech); font-size: 10px;
+  letter-spacing: 1px; padding: 4px 24px; animation: pulse 1.2s ease-in-out infinite;
+}
+
+.msg-wrapper.other .msg-sender { color: var(--neon-purple); }
+
+#create-group-modal, #group-settings-modal { display: none; }
+
+.group-card-item {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer;
+  border-radius: var(--radius-card); border: 1px solid var(--border-subtle);
+  transition: border-color var(--t-fast), background var(--t-fast); background: var(--bg-card);
+}
+.group-card-item:hover { border-color: var(--neon-purple); background: rgba(155, 92, 246, 0.06); }
+
+/* ════════════════════════════════════════════════════════════
+   CYBERPUNK // PROJECT ANIMATIONS v2.0
+   ════════════════════════════════════════════════════════════ */
+
+/* ── KEYFRAMES ───────────────────────────────────────────────── */
+
+@keyframes glitch-top {
+  0%,100% { transform: translate(0); opacity: 0; }
+  5%  { transform: translate(-4px, -2px); opacity: 0.7; clip-path: inset(0 0 80% 0); }
+  10% { transform: translate(4px, 0);    opacity: 0.5; clip-path: inset(0 0 70% 0); }
+  15% { opacity: 0; }
+}
+@keyframes glitch-bot {
+  0%,100% { transform: translate(0); opacity: 0; }
+  7%  { transform: translate(4px, 2px);  opacity: 0.6; clip-path: inset(80% 0 0 0); }
+  12% { transform: translate(-4px, 0);   opacity: 0.4; clip-path: inset(70% 0 0 0); }
+  17% { opacity: 0; }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+
+@keyframes neon-flicker {
+  0%, 19%, 21%, 23%, 25%, 54%, 56%, 100% {
+    opacity: 1;
+    text-shadow: 0 0 4px #fff, 0 0 10px var(--accent-cyan), 0 0 20px var(--accent-cyan), 0 0 40px var(--accent-cyan);
+  }
+  20%, 24%, 55% { opacity: 0.5; text-shadow: none; }
+}
+
+/* PROJECT: card lắp ráp từ center — clip-path mở ra + hue flash */
+@keyframes fragment-build {
+  0% {
+    opacity: 0;
+    clip-path: polygon(50% 50%, 50% 50%, 50% 50%, 50% 50%, 50% 50%, 50% 50%);
+    filter: brightness(3) hue-rotate(180deg);
+    transform: scale(0.92);
+  }
+  25% {
+    opacity: 1;
+    filter: brightness(2) hue-rotate(90deg);
+    clip-path: polygon(50% 20%, calc(100% - 5px) 20%, calc(100% - 5px) 80%, 5px 80%, 5px 20%, 50% 20%);
+  }
+  55% {
+    filter: brightness(1.4) hue-rotate(20deg);
+    clip-path: polygon(0 5px, calc(100% - 10px) 0, 100% 10px, 100% calc(100% - 5px), 10px 100%, 0 calc(100% - 10px));
+  }
+  100% {
+    filter: brightness(1) hue-rotate(0deg);
+    clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* PROJECT: avatar data-resolve — blur + brightness drop */
+@keyframes avatar-data-resolve {
+  0%   { filter: brightness(4) blur(4px) drop-shadow(0 0 8px var(--accent-cyan)); opacity: 0; }
+  40%  { filter: brightness(2) blur(1px) drop-shadow(0 0 6px var(--accent-pink)); opacity: 1; }
+  100% { filter: brightness(1) blur(0) drop-shadow(0 0 4px var(--accent-cyan)); }
+}
+
+/* Avatar glow cycle cyan → pink */
+@keyframes avatar-glow-cycle {
+  0%   { filter: drop-shadow(0 0 4px var(--accent-cyan)); }
+  50%  { filter: drop-shadow(0 0 10px var(--accent-pink)); }
+  100% { filter: drop-shadow(0 0 4px var(--accent-cyan)); }
+}
+
+/* Hologram flicker — panel */
+@keyframes holo-flicker {
+  0%, 100% { opacity: 1; transform: skewX(0deg); filter: brightness(1); }
+  92%       { opacity: 1; transform: skewX(0deg); filter: brightness(1); }
+  93%       { opacity: 0.8; transform: skewX(-1deg) scaleY(0.99); filter: brightness(1.3) hue-rotate(10deg); }
+  94%       { opacity: 1; transform: skewX(0.5deg); filter: brightness(0.9); }
+  95%       { opacity: 0.9; transform: skewX(-0.5deg); filter: brightness(1.2) hue-rotate(-10deg); }
+  96%       { opacity: 1; transform: skewX(0deg); filter: brightness(1); }
+}
+
+/* Border pulse on hover */
+@keyframes border-pulse-proj {
+  0%,100% { box-shadow: 0 0 6px rgba(0,212,255,0.3), inset 0 0 4px rgba(0,212,255,0.08); }
+  50%      { box-shadow: 0 0 20px rgba(0,212,255,0.75), 0 0 35px rgba(0,212,255,0.2), inset 0 0 10px rgba(0,212,255,0.12); }
+}
+
+/* Card glitch frame khi hover bắt đầu */
+@keyframes card-glitch-enter {
+  0%   { filter: none; transform: translate(0,0); }
+  20%  { filter: hue-rotate(90deg) brightness(1.4); transform: translate(2px, 0); }
+  40%  { filter: none; transform: translate(-1px, 1px); }
+  60%  { filter: hue-rotate(-30deg) saturate(1.8); transform: translate(0,0); }
+  80%  { filter: none; }
+  100% { filter: none; transform: translate(0,0); }
+}
+
+/* Scan line chạy qua card khi idle */
+@keyframes card-scan {
+  0%   { top: -5%; opacity: 0; }
+  5%   { opacity: 0.5; }
+  95%  { opacity: 0.5; }
+  100% { top: 110%; opacity: 0; }
+}
+
+/* Data stream — text xuất hiện */
+@keyframes data-stream {
+  0%   { opacity: 0; transform: translateX(-8px); letter-spacing: 0.3em; }
+  60%  { opacity: 1; }
+  100% { opacity: 1; transform: translateX(0); letter-spacing: 0.12em; }
+}
+
+/* Name shimmer khi hover */
+@keyframes shimmer-name {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+
+
+/* ── LOGO ────────────────────────────────────────────────────── */
+.logo-text {
+  position: relative;
+  animation: neon-flicker 6s infinite;
+}
+.logo-text::before, .logo-text::after {
+  content: attr(data-text);
+  position: absolute; inset: 0;
+  background: inherit;
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  pointer-events: none;
+}
+.logo-text::before {
+  animation: glitch-top 5s infinite;
+  color: var(--accent-cyan); -webkit-text-fill-color: var(--accent-cyan); background: none;
+}
+.logo-text::after {
+  animation: glitch-bot 5s infinite;
+  color: var(--accent-pink); -webkit-text-fill-color: var(--accent-pink); background: none;
+}
+
+/* ── USERS PANEL — holo flicker ─────────────────────────────── */
+.users-panel { animation: holo-flicker 8s infinite; }
+
+/* ── USER CARD — PROJECT fragment-build ─────────────────────── */
+.user-card { animation: fragment-build 0.6s cubic-bezier(0.16,1,0.3,1) both; }
+
+.user-card:nth-child(1)  { animation-delay: 0.00s; }
+.user-card:nth-child(2)  { animation-delay: 0.07s; }
+.user-card:nth-child(3)  { animation-delay: 0.14s; }
+.user-card:nth-child(4)  { animation-delay: 0.21s; }
+.user-card:nth-child(5)  { animation-delay: 0.28s; }
+.user-card:nth-child(6)  { animation-delay: 0.35s; }
+.user-card:nth-child(7)  { animation-delay: 0.42s; }
+.user-card:nth-child(8)  { animation-delay: 0.49s; }
+.user-card:nth-child(9)  { animation-delay: 0.56s; }
+.user-card:nth-child(10) { animation-delay: 0.63s; }
+.user-card:nth-child(11) { animation-delay: 0.70s; }
+.user-card:nth-child(12) { animation-delay: 0.77s; }
+
+/* Scan line chạy trên card idle — dùng ::after đã có, bỏ trick này */
+/* Hover: glitch frame + border pulse */
+.user-card:hover {
+  animation: card-glitch-enter 0.35s ease forwards, border-pulse-proj 1.6s ease-in-out infinite 0.35s;
+}
+
+/* ── AVATAR — data-resolve lúc build, glow cycle idle ───────── */
+.user-avatar { animation: avatar-data-resolve 0.8s ease both, avatar-glow-cycle 4s ease-in-out infinite 0.8s; }
+
+/* ── USERNAME — data-stream enter, shimmer khi hover ────────── */
+.user-name {
+  animation: data-stream 0.5s ease both;
+  background: linear-gradient(
+    90deg,
+    var(--text-main) 0%,
+    var(--accent-cyan) 40%,
+    var(--text-main) 60%,
+    var(--text-main) 100%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.user-card:hover .user-name {
+  animation: shimmer-name 1.4s linear infinite;
+  background-size: 200% auto;
+}
+
+/* ── AUTH CONTAINER ──────────────────────────────────────────── */
+.auth-container { animation: holo-flicker 10s infinite; }
+
+/* ── PANEL TITLE ─────────────────────────────────────────────── */
+.panel-title { animation: data-stream 0.6s ease both; }
+
+
+/* ── LIGHT THEME — tắt effect mạnh ─────────────────────────── */
+body.light-theme .user-card,
+body.light-theme .cyber-btn,
+body.light-theme .btn-add-friend,
+body.light-theme .user-avatar {
+  clip-path: none;
+  border-radius: var(--radius-card) !important;
+}
+body.light-theme .logo-text { animation: none; }
+body.light-theme .users-panel { animation: none; }
+body.light-theme .user-card { animation: none; }
+body.light-theme .user-card:hover { animation: none; }
+body.light-theme .user-avatar { animation: none; }
+body.light-theme .user-name {
+  background: none;
+  -webkit-text-fill-color: var(--text-main);
+  animation: none;
 }

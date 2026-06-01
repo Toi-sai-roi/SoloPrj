@@ -44,7 +44,7 @@
   <!-- SCREEN 2: HOME -->
   <div id="home-screen" class="screen">
     <header class="app-header">
-      <div class="logo-text">CYBERPUNK // ROOMS</div>
+      <div class="logo-text" data-text="CYBERPUNK // ROOMS">CYBERPUNK // ROOMS</div>
       <div class="user-profile">
         <span id="current-user-display" class="current-user-tag"
           onclick="openProfile(AppState.currentUser.toLowerCase())" style="cursor: pointer;">USER // NEO</span>
@@ -55,7 +55,11 @@
       <div class="users-panel">
         <div class="panel-title">
           <span>ACTIVE COGNITIVE NODES</span>
-          <span id="users-count">0 NODES</span>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <button id="create-group-btn" class="cyber-btn" onclick="openCreateGroupModal()"
+              style="display:none; padding:4px 10px; font-size:9px; min-width:auto; height:auto; border-color:var(--neon-purple); color:var(--neon-purple);">+ GROUP</button>
+            <span id="users-count">0 NODES</span>
+          </div>
         </div>
 
         <div class="auth-tabs"
@@ -66,6 +70,9 @@
           <button id="tab-users-friends" class="auth-tab"
             style="flex: 1; padding: 8px; font-size: 10px; font-family: var(--font-tech); letter-spacing: 1px;"
             onclick="switchUsersTab('friends')">FRIENDS</button>
+          <button id="tab-users-groups" class="auth-tab"
+            style="flex: 1; padding: 8px; font-size: 10px; font-family: var(--font-tech); letter-spacing: 1px;"
+            onclick="switchUsersTab('groups')">GROUPS</button>
         </div>
 
         <div class="search-container">
@@ -143,10 +150,73 @@
       <script src="js/users.js"></script>
       <script src="js/chat.js"></script>
       <script src="js/profile.js"></script>
+      <script src="js/group.js"></script>
     </div>
   </div>
 
-  <button class="theme-toggle" id="theme-toggle-btn" onclick="toggleTheme()">🌙</button>
+  <!-- MODAL: Tạo nhóm -->
+  <div id="create-group-modal" style="display:none; position:fixed; inset:0; z-index:9000; background:rgba(7,11,20,0.85); backdrop-filter:blur(8px); justify-content:center; align-items:center;">
+    <div class="glass-panel" style="width:400px; max-width:90vw; padding:28px; position:relative;">
+      <div style="font-family:var(--font-tech); font-size:13px; color:var(--accent-cyan); letter-spacing:2px; margin-bottom:20px;">
+        CREATE GROUP // NEW NODE CLUSTER
+      </div>
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <div>
+          <label style="font-size:10px; color:var(--text-muted); font-family:var(--font-tech); letter-spacing:1px;">GROUP NAME *</label>
+          <input type="text" id="group-name-input" class="cyber-input" placeholder="e.g. SECTOR_7_OPS" style="margin-top:6px;" maxlength="50">
+        </div>
+        <div>
+          <label style="font-size:10px; color:var(--text-muted); font-family:var(--font-tech); letter-spacing:1px;">DESCRIPTION</label>
+          <input type="text" id="group-desc-input" class="cyber-input" placeholder="Mô tả nhóm..." style="margin-top:6px;" maxlength="100">
+        </div>
+        <div>
+          <label style="font-size:10px; color:var(--text-muted); font-family:var(--font-tech); letter-spacing:1px;">INVITE MEMBERS</label>
+          <div id="group-members-select" style="margin-top:8px; max-height:160px; overflow-y:auto; border:1px solid var(--border-card); border-radius:var(--radius-card); padding:8px; display:flex; flex-direction:column; gap:4px;"></div>
+        </div>
+        <div style="display:flex; gap:10px; margin-top:8px;">
+          <button class="cyber-btn" onclick="submitCreateGroup()" style="flex:1;">DEPLOY GROUP</button>
+          <button class="cyber-btn" onclick="closeCreateGroupModal()" style="flex:1; border-color:var(--text-muted); color:var(--text-muted);">CANCEL</button>
+        </div>
+        <div id="create-group-error" style="font-size:10px; color:var(--accent-pink); font-family:var(--font-tech); display:none;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Quản lý nhóm (thêm thành viên, kick, rời) -->
+  <div id="group-settings-modal" style="display:none; position:fixed; inset:0; z-index:9000; background:rgba(7,11,20,0.85); backdrop-filter:blur(8px); justify-content:center; align-items:center;">
+    <div class="glass-panel" style="width:420px; max-width:90vw; padding:28px; position:relative; max-height:80vh; overflow-y:auto;">
+      <div style="font-family:var(--font-tech); font-size:13px; color:var(--accent-cyan); letter-spacing:2px; margin-bottom:20px;">
+        GROUP SETTINGS // NODE CLUSTER CONFIG
+      </div>
+      <div id="group-settings-content"></div>
+      <button class="cyber-btn" onclick="closeGroupSettings()" style="width:100%; margin-top:16px; border-color:var(--text-muted); color:var(--text-muted);">CLOSE</button>
+    </div>
+  </div>
+
+  <!-- SCREEN 4: GROUP CHAT -->
+  <div id="group-chat-screen" class="screen">
+    <div class="chat-container">
+      <header class="chat-header">
+        <div class="chat-partner-info">
+          <button class="cyber-btn cyan-alt" onclick="exitGroupChat()"
+            style="padding: 7px 16px; font-size: 10px; margin-right: 4px;">BACK</button>
+          <div id="group-chat-avatar" class="user-avatar" style="width:36px;height:36px;font-size:13px;border-radius:8px;">G</div>
+          <div style="flex:1;">
+            <div id="group-chat-name" class="chat-partner-name">GROUP // SECTOR</div>
+            <div id="group-chat-meta" style="font-size:9px; color:var(--text-muted); font-family:var(--font-tech); letter-spacing:0.1em; margin-top:3px;">0 MEMBERS</div>
+          </div>
+          <button class="cyber-btn" onclick="openGroupSettings(AppState.activeGroup)"
+            style="padding:7px 14px; font-size:9px; min-width:auto; border-color:var(--neon-purple); color:var(--neon-purple);">MANAGE</button>
+        </div>
+      </header>
+      <div id="group-messages-area" class="messages-area"></div>
+      <div id="group-typing-indicator" style="display:none; padding:6px 24px; font-size:10px; color:var(--accent-cyan); font-family:var(--font-tech);"></div>
+      <form id="group-chat-input-form" class="chat-input-bar" onsubmit="handleSendGroupMessage(event)">
+        <input type="text" id="group-chat-input-field" class="cyber-input" placeholder="Broadcast to cluster..." autocomplete="off">
+        <button type="submit" class="cyber-btn" style="padding: 11px 22px; min-width: 80px;">SEND</button>
+      </form>
+    </div>
+  </div>
 
 </body>
 </html>
