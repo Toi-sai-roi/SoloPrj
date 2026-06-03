@@ -1,5 +1,5 @@
 // ==========================================
-// users.js — Fetch, render, search users
+// js/users.js — Fetch, render, search users
 // ==========================================
 
 async function loadUsers() {

@@ -38,12 +38,12 @@ function getTopReactions(reactionMap, reactionTimestamps = {}) {
 // 🔥 TÍCH HỢP VỊ TRÍ 1: Hàm kiểm tra trạng thái quan hệ song phương và khóa/mở khóa ô chat
 async function checkChatLockState(targetUser) {
   try {
-    const res = await fetch(`/api/friends/status/${encodeURIComponent(targetUser)}`, { 
-      headers: { 'Authorization': `Bearer ${AppState.token}` } 
+    const res = await fetch(`/api/friends/status/${encodeURIComponent(targetUser)}`, {
+      headers: { 'Authorization': `Bearer ${AppState.token}` }
     });
     const relData = await res.json();
     const inputField = document.getElementById('chat-input-field');
-    const sendBtn = document.getElementById('chat-send-btn'); 
+    const sendBtn = document.getElementById('chat-send-btn');
 
     if (inputField) {
       if (relData.relation === 'blocking') {
@@ -138,17 +138,17 @@ function initWebSocket() {
           if (data.text.includes('ACCESS_DENIED')) {
             // Render dòng chữ thông báo lỗi ra giữa khung chat
             appendSystemMessage(data.text);
-            
+
             // Tìm ô nhập liệu và nút gửi để khóa cứng lại
             const inputField = document.getElementById('chat-input-field');
-            const sendBtn = document.getElementById('chat-send-btn'); 
+            const sendBtn = document.getElementById('chat-send-btn');
             if (inputField) {
               inputField.disabled = true;
               inputField.placeholder = "BẠN ĐÃ BỊ CHẶN KẾT NỐI ĐẾN NODE NÀY...";
               inputField.value = ""; // Xóa sạch chữ đang gõ dở
             }
             if (sendBtn) sendBtn.disabled = true;
-          } 
+          }
           // 2. Các thông báo hệ thống thông thường (Ví dụ: ai đó đăng nhập/đăng xuất mạng lưới)
           else {
             if (AppState.activeChatPartner && data.text.includes(AppState.activeChatPartner)) {
@@ -312,7 +312,7 @@ function initWebSocket() {
             }).then(r => r.json()).then(group => {
               if (metaEl) metaEl.textContent = `${group.members.length} NODES`;
               AppState.activeGroupData = group;
-            }).catch(() => {});
+            }).catch(() => { });
           }
           if (AppState.currentUsersTab === 'groups' && typeof loadAndRenderGroups === 'function') {
             loadAndRenderGroups();
@@ -398,7 +398,7 @@ function showReactionPicker(messageId, event) {
   `;
 
   const rect = event.target.getBoundingClientRect();
-  const pickerWidth = 360; 
+  const pickerWidth = 360;
 
   picker.style.position = 'fixed';
   picker.style.bottom = (window.innerHeight - rect.top + 8) + 'px';
@@ -448,13 +448,13 @@ function updateMessageReaction(messageId, reactionMapRaw, reactionTimestampsRaw)
   if (!messageDiv) return;
 
   const msgBubble = messageDiv.querySelector('.msg-bubble');
-  if (!msgBubble) return; 
+  if (!msgBubble) return;
 
   let reactionsRow = msgBubble.querySelector('.reactions-row');
   if (!reactionsRow) {
     reactionsRow = document.createElement('div');
     reactionsRow.className = 'reactions-row';
-    msgBubble.appendChild(reactionsRow); 
+    msgBubble.appendChild(reactionsRow);
   }
 
   const reactionMap = typeof reactionMapRaw === 'string' ? JSON.parse(reactionMapRaw) : (reactionMapRaw || {});
@@ -515,7 +515,7 @@ function triggerMediaInput() {
   document.getElementById('media-input').click();
 }
 
-function handleMediaSelect(event) {
+async function handleMediaSelect(event) {
   const file = event.target.files[0];
   if (!file) return;
 
@@ -526,11 +526,26 @@ function handleMediaSelect(event) {
     return;
   }
 
-  const reader = new FileReader();
-  reader.onload = function (e) {
-    AppState.selectedMedia = e.target.result;
-    AppState.selectedMediaType = file.type;
+  // Upload lên server trước
+  const formData = new FormData();
+  formData.append('file', file);
 
+  try {
+    const res = await fetch('/api/upload', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${AppState.token}` },
+      body: formData
+    });
+
+    if (!res.ok) throw new Error('Upload failed');
+    const data = await res.json();
+
+    // Lưu URL vào AppState thay vì base64
+    AppState.selectedMedia = data.url;  // URL: /uploads/filename
+    AppState.selectedMediaType = file.type;
+    AppState.selectedMediaName = file.name;
+
+    // Preview
     const previewContainer = document.getElementById('media-preview-container');
     const previewWrapper = document.getElementById('media-preview-wrapper');
     const previewName = document.getElementById('media-preview-name');
@@ -542,7 +557,7 @@ function handleMediaSelect(event) {
     previewWrapper.innerHTML = '';
     if (file.type.startsWith('image/')) {
       const img = document.createElement('img');
-      img.src = e.target.result;
+      img.src = data.url;  // Dùng URL server
       img.style.width = '100%';
       img.style.height = '100%';
       img.style.objectFit = 'cover';
@@ -553,9 +568,12 @@ function handleMediaSelect(event) {
 
     previewContainer.style.display = 'flex';
     scrollToBottom();
-  };
 
-  reader.readAsDataURL(file);
+  } catch (err) {
+    console.error('Upload error:', err);
+    alert('Không thể upload file. Vui lòng thử lại.');
+    clearMediaSelection();
+  }
 }
 
 function handleSendMessage(e) {
@@ -567,28 +585,30 @@ function handleSendMessage(e) {
   if (!text && !AppState.selectedMedia) return;
 
   if (AppState.ws && AppState.ws.readyState === WebSocket.OPEN) {
+    // Gửi media + text (hoặc chỉ media)
     if (AppState.selectedMedia) {
+      console.log('Sending media:', AppState.selectedMedia);  // log để debug
       AppState.ws.send(JSON.stringify({
         type: 'send_message',
         to: AppState.activeChatPartner,
-        text: AppState.selectedMedia
+        text: text || '',
+        media_url: AppState.selectedMedia
       }));
       clearMediaSelection();
     }
-
-    if (text) {
+    // Gửi text-only
+    else if (text) {
       AppState.ws.send(JSON.stringify({
         type: 'send_message',
         to: AppState.activeChatPartner,
         text: text
       }));
-      field.value = '';
-      field.focus();
-      sendTypingStop();
-      if (typingTimeout) clearTimeout(typingTimeout);
     }
-  } else {
-    alert('Kênh WebSocket đã bị ngắt kết nối. Đang thử kết nối lại...');
+
+    field.value = '';
+    field.focus();
+    sendTypingStop();
+    if (typingTimeout) clearTimeout(typingTimeout);
   }
 }
 
@@ -596,6 +616,11 @@ function handleSendMessage(e) {
 
 function appendChatMessage(msg) {
   const messagesArea = document.getElementById('messages-area');
+  if (!messagesArea) {
+    console.error('messages-area not found!');
+    return;
+  }
+
   const blankState = messagesArea.querySelector('.blank-state');
   if (blankState) blankState.remove();
 
@@ -605,11 +630,30 @@ function appendChatMessage(msg) {
   wrapper.setAttribute('data-message-id', msg.id);
 
   let bubbleContent = '';
-  if (msg.text && msg.text.startsWith('data:image/')) {
-    bubbleContent = `<img src="${msg.text}" class="chat-media-img" onclick="openLightbox(this.src)" title="Nhấp để phóng to" alt="Ảnh đính kèm">`;
-  } else if (msg.text && msg.text.startsWith('data:video/')) {
-    bubbleContent = `<video src="${msg.text}" controls class="chat-media-vid"></video>`;
-  } else {
+
+  // Check media_url trước (mới)
+  if (msg.media_url && msg.media_url.trim() !== '') {
+    if (msg.media_url.match(/\.(jpg|jpeg|png|gif|webp)$/i) || msg.media_url.startsWith('data:image/')) {
+      bubbleContent = `<img src="${msg.media_url}" class="chat-media-img" onclick="openLightbox(this.src)" title="Nhấp để phóng to" alt="Ảnh đính kèm">`;
+    } else if (msg.media_url.match(/\.(mp4|webm|mov)$/i) || msg.media_url.startsWith('data:video/')) {
+      bubbleContent = `<video src="${msg.media_url}" controls class="chat-media-vid"></video>`;
+    } else {
+      const filename = msg.media_url.split('/').pop();
+      bubbleContent = `<a href="${msg.media_url}" download="${filename}" class="chat-file-link">📎 ${filename}</a>`;
+    }
+  }
+  // Fallback: base64 trong text (cũ)
+  else if (msg.text && msg.text.startsWith('data:')) {
+    if (msg.text.startsWith('data:image/')) {
+      bubbleContent = `<img src="${msg.text}" class="chat-media-img" onclick="openLightbox(this.src)" title="Nhấp để phóng to" alt="Ảnh đính kèm">`;
+    } else if (msg.text.startsWith('data:video/')) {
+      bubbleContent = `<video src="${msg.text}" controls class="chat-media-vid"></video>`;
+    } else {
+      bubbleContent = `<a href="${msg.text}" download="file" class="chat-file-link">📎 Tải file</a>`;
+    }
+  }
+  // Plain text
+  else {
     bubbleContent = escapeHTML(msg.text || '');
   }
 
@@ -657,6 +701,7 @@ function appendChatMessage(msg) {
   `;
   messagesArea.appendChild(wrapper);
   scrollToBottom();
+
 }
 
 function sendTypingStop() {
