@@ -303,3 +303,29 @@ function glowNotification(sender) {
     }, 4000);
   }
 }
+
+// Matrix rain — light mode hover
+function initMatrixRain() {
+  if (!document.body.classList.contains('light-theme')) return;
+  
+  const chars = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789';
+  
+  document.querySelectorAll('.user-card').forEach(card => {
+    if (card._matrix) return;
+    card._matrix = true;
+    
+    const rain = document.createElement('div');
+    rain.className = 'matrix-rain';
+    card.appendChild(rain);
+    
+    // Tạo 15 cột ký tự rơi
+    for (let i = 0; i < 15; i++) {
+      const span = document.createElement('span');
+      span.textContent = chars[Math.floor(Math.random() * chars.length)];
+      span.style.left = `${(i / 15) * 100}%`;
+      span.style.animationDuration = `${1.5 + Math.random() * 2}s`;
+      span.style.animationDelay = `${Math.random() * 2}s`;
+      rain.appendChild(span);
+    }
+  });
+}
