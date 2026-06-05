@@ -1,9 +1,9 @@
 const { query } = require('./config/db');
 
 async function init() {
-  try {
-    // Users table
-    await query(`
+    try {
+        // Users table
+        await query(`
       CREATE TABLE IF NOT EXISTS users (
         username VARCHAR(30) PRIMARY KEY,
         password_hash VARCHAR(255) NOT NULL,
@@ -15,8 +15,8 @@ async function init() {
       )
     `);
 
-    // Messages table
-    await query(`
+        // Messages table
+        await query(`
       CREATE TABLE IF NOT EXISTS messages (
         id SERIAL PRIMARY KEY,
         sender VARCHAR(30) REFERENCES users(username) ON DELETE CASCADE,
@@ -29,8 +29,8 @@ async function init() {
       )
     `);
 
-    // Friends table
-    await query(`
+        // Friends table
+        await query(`
       CREATE TABLE IF NOT EXISTS friends (
         user1 VARCHAR(30) REFERENCES users(username) ON DELETE CASCADE,
         user2 VARCHAR(30) REFERENCES users(username) ON DELETE CASCADE,
@@ -40,8 +40,8 @@ async function init() {
       )
     `);
 
-    // Blocks table
-    await query(`
+        // Blocks table
+        await query(`
       CREATE TABLE IF NOT EXISTS blocks (
         blocker VARCHAR(30) REFERENCES users(username) ON DELETE CASCADE,
         blocked VARCHAR(30) REFERENCES users(username) ON DELETE CASCADE,
@@ -50,8 +50,8 @@ async function init() {
       )
     `);
 
-    // Groups table
-    await query(`
+        // Groups table
+        await query(`
       CREATE TABLE IF NOT EXISTS groups (
         id SERIAL PRIMARY KEY,
         name VARCHAR(100) NOT NULL,
@@ -61,8 +61,8 @@ async function init() {
       )
     `);
 
-    // Group members
-    await query(`
+        // Group members
+        await query(`
       CREATE TABLE IF NOT EXISTS group_members (
         group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE,
         username VARCHAR(30) REFERENCES users(username) ON DELETE CASCADE,
@@ -71,8 +71,8 @@ async function init() {
       )
     `);
 
-    // Group messages
-    await query(`
+        // Group messages
+        await query(`
       CREATE TABLE IF NOT EXISTS group_messages (
         id SERIAL PRIMARY KEY,
         group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE,
@@ -83,8 +83,8 @@ async function init() {
       )
     `);
 
-    // Reactions
-    await query(`
+        // Reactions
+        await query(`
       CREATE TABLE IF NOT EXISTS reactions (
         message_id INTEGER REFERENCES messages(id) ON DELETE CASCADE,
         username VARCHAR(30) REFERENCES users(username) ON DELETE CASCADE,
@@ -94,8 +94,8 @@ async function init() {
       )
     `);
 
-    // Group reactions
-    await query(`
+        // Group reactions
+        await query(`
       CREATE TABLE IF NOT EXISTS group_reactions (
         message_id INTEGER REFERENCES group_messages(id) ON DELETE CASCADE,
         username VARCHAR(30) REFERENCES users(username) ON DELETE CASCADE,
@@ -105,8 +105,8 @@ async function init() {
       )
     `);
 
-    // Media uploads
-    await query(`
+        // Media uploads
+        await query(`
       CREATE TABLE IF NOT EXISTS media_uploads (
         id SERIAL PRIMARY KEY,
         filename VARCHAR(255) NOT NULL,
@@ -118,13 +118,19 @@ async function init() {
         uploaded_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       )
     `);
-
-    console.log('✅ Database initialized');
-    process.exit(0);
-  } catch (err) {
-    console.error('❌ Init error:', err);
-    process.exit(1);
-  }
+        // Online users 
+        await query(`
+      CREATE TABLE IF NOT EXISTS online_users (
+        username VARCHAR(30) PRIMARY KEY REFERENCES users(username) ON DELETE CASCADE,
+        connected_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+        console.log('✅ Database initialized');
+        process.exit(0);
+    } catch (err) {
+        console.error('❌ Init error:', err);
+        process.exit(1);
+    }
 }
 
 init();
