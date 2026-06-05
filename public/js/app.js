@@ -1,6 +1,5 @@
 // ==========================================
-// app.js — App controller chính
-// Global state, screen routing, init
+// public/js/app.js — Global state, screen routing, init
 // ==========================================
 
 // State toàn cục - dùng chung cho tất cả modules
@@ -13,6 +12,32 @@ const AppState = {
   activeGroup: null,
   activeGroupData: null,
   ws: null
+};
+
+// === AUTO LOGOUT KHI AUTH FAIL ===
+function handleAuthError() {
+  localStorage.removeItem('cyber_token');
+  localStorage.removeItem('cyber_username');
+  AppState.token = null;
+  AppState.currentUser = null;
+  if (AppState.ws) {
+    AppState.ws.close();
+    AppState.ws = null;
+  }
+  alert('Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.');
+  location.reload();
+}
+
+// Global fetch interceptor — tự động logout khi API trả 401/403
+const originalFetch = window.fetch;
+window.fetch = async function (...args) {
+  const res = await originalFetch.apply(this, args);
+
+  if ((res.status === 401 || res.status === 403) && !res.url.includes('/api/login') && !res.url.includes('/api/register')) {
+    handleAuthError();
+  }
+
+  return res;
 };
 
 // Theme toggle

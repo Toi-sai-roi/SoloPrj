@@ -113,6 +113,13 @@ const onlineUsers = new Map();
 async function trackOnlineUser(username, isOnline) {
   try {
     if (isOnline) {
+      // Kiểm tra user tồn tại trong DB trước khi insert
+      const userCheck = await query('SELECT 1 FROM users WHERE username = $1', [username]);
+      if (userCheck.rows.length === 0) {
+        console.log(`[WS] User ${username} not found in DB, skipping online tracking`);
+        return;
+      }
+      
       await query(`
         INSERT INTO online_users (username, connected_at)
         VALUES ($1, CURRENT_TIMESTAMP)
@@ -223,6 +230,14 @@ wss.on('connection', async (wsConn, req) => {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     username = decoded.username;
+    
+    // KIỂM TRA USER TỒN TẠI TRONG DB
+    const userCheck = await query('SELECT 1 FROM users WHERE username = $1', [username]);
+    if (userCheck.rows.length === 0) {
+      console.log(`[WS] Rejecting connection: User ${username} not found in DB`);
+      wsConn.close(1008, 'User not found');
+      return;
+    }
   } catch {
     wsConn.close(1008, 'Invalid token');
     return;

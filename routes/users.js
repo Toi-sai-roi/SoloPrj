@@ -21,8 +21,8 @@ router.get('/', authenticateToken, async (req, res) => {
         END as online,
         CASE 
           WHEN f.status = 'accepted' THEN 'friend'
-          WHEN f.status = 'pending' AND f.user_one = $1 THEN 'pending_sent'
-          WHEN f.status = 'pending' AND f.user_one != $1 THEN 'pending_received'
+          WHEN f.status = 'pending' AND f.sender = $1 THEN 'pending_sent'
+          WHEN f.status = 'pending' AND f.sender != $1 THEN 'pending_received'
           ELSE 'none'
         END as relation
       FROM users u
@@ -39,10 +39,10 @@ router.get('/', authenticateToken, async (req, res) => {
         LIMIT 1
       ) b ON TRUE
       LEFT JOIN LATERAL (
-        SELECT status, sender, user_one, user_two
+        SELECT status, sender
         FROM friends
-        WHERE (user_one = $1 AND user_two = u.username)
-           OR (user_one = u.username AND user_two = $1)
+        WHERE (user1 = $1 AND user2 = u.username)
+           OR (user1 = u.username AND user2 = $1)
         LIMIT 1
       ) f ON TRUE
       WHERE u.username != $1
@@ -72,9 +72,9 @@ router.post('/friend-action', authenticateToken, async (req, res) => {
 
     if (action === 'add') {
       await query(`
-        INSERT INTO friends (user_one, user_two, status, sender)
+        INSERT INTO friends (user1, user2, status, sender)
         VALUES ($1, $2, 'pending', $3)
-        ON CONFLICT (user_one, user_two) 
+        ON CONFLICT (user1, user2) 
         DO UPDATE SET status = 'pending', sender = $3
       `, [u1, u2, me]);
 
@@ -85,9 +85,23 @@ router.post('/friend-action', authenticateToken, async (req, res) => {
     }
 
     if (action === 'accept') {
+      // ✅ KIỂM TRA QUYỀN: Chỉ người NHẬN lời mời mới được accept
+      const checkResult = await query(`
+        SELECT sender FROM friends WHERE user1 = $1 AND user2 = $2 AND status = 'pending'
+      `, [u1, u2]);
+      
+      if (checkResult.rows.length === 0) {
+        return res.status(404).json({ error: 'No pending request found' });
+      }
+      
+      const requestSender = checkResult.rows[0].sender;
+      if (requestSender === me) {
+        return res.status(403).json({ error: 'Cannot accept your own request' });
+      }
+      
       await query(`
         UPDATE friends SET status = 'accepted' 
-        WHERE user_one = $1 AND user_two = $2
+        WHERE user1 = $1 AND user2 = $2
       `, [u1, u2]);
 
       const { broadcastToUser } = require('../server');
@@ -98,7 +112,7 @@ router.post('/friend-action', authenticateToken, async (req, res) => {
 
     if (action === 'cancel') {
       await query(`
-        DELETE FROM friends WHERE user_one = $1 AND user_two = $2
+        DELETE FROM friends WHERE user1 = $1 AND user2 = $2
       `, [u1, u2]);
 
       const { broadcastToUser } = require('../server');

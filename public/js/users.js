@@ -9,7 +9,7 @@ async function loadUsers() {
     });
 
     if (!response.ok) {
-      if (response.status === 401) { handleLogout(); return; }
+      if (response.status === 401 || response.status === 403) return; // handleAuthError đã xử lý
       throw new Error('Không thể fetch dữ liệu users');
     }
 
@@ -173,6 +173,7 @@ async function handleFriendRequestAction(targetUser, actionType) {
     });
 
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403) return; // handleAuthError đã xử lý
       throw new Error('Server gặp sự cố hoặc từ chối xử lý');
     }
 
@@ -228,7 +229,10 @@ async function loadAndRenderGroups() {
     const res = await fetch('/api/groups/my', {
       headers: { 'Authorization': `Bearer ${AppState.token}` }
     });
-    if (!res.ok) throw new Error('Failed');
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) return; // handleAuthError đã xử lý
+      throw new Error('Failed');
+    }
     const groups = await res.json();
     AppState.groupsData = groups;
 

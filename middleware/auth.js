@@ -2,6 +2,7 @@
 // middleware/auth.js — JWT Authentication
 // ==========================================
 const jwt = require('jsonwebtoken');
+const { query } = require('../config/db');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
@@ -9,7 +10,7 @@ if (!JWT_SECRET) {
   process.exit(1);
 }
 
-function authenticateToken(req, res, next) {
+async function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
@@ -18,10 +19,22 @@ function authenticateToken(req, res, next) {
   }
 
   try {
-    req.user = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET);
+    
+    // Kiểm tra user có tồn tại trong DB không
+    const userCheck = await query('SELECT 1 FROM users WHERE username = $1', [decoded.username]);
+    if (userCheck.rows.length === 0) {
+      return res.status(401).json({ error: 'User not found' });
+    }
+    
+    req.user = decoded;
     next();
   } catch (err) {
-    return res.status(403).json({ error: 'Invalid or expired token' });
+    if (err.name === 'JsonWebTokenError' || err.name === 'TokenExpiredError') {
+      return res.status(403).json({ error: 'Invalid or expired token' });
+    }
+    console.error('Auth middleware error:', err);
+    return res.status(500).json({ error: 'Server error' });
   }
 }
 

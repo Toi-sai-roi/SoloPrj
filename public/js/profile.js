@@ -1,5 +1,5 @@
 // ==========================================
-// profile.js — User profile & avatar (FIXED 3 TẦNG TUYỆT ĐỐI)
+// profile.js — User profile & avatar
 // ==========================================
 
 // Hàm mở Modal Profile (Lớp 2)
@@ -17,10 +17,18 @@ async function openProfile(username) {
 
   try {
     const response = await fetch(`/api/profile/${encodeURIComponent(username)}`, { headers: { 'Authorization': `Bearer ${AppState.token}` } });
-    if (!response.ok) throw new Error('Failed to fetch node info');
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) return;
+      throw new Error('Failed to fetch node info');
+    }
     const profileData = await response.json();
     console.log('API response:', profileData);
+    
     const relResponse = await fetch(`/api/friends/status/${encodeURIComponent(username)}`, { headers: { 'Authorization': `Bearer ${AppState.token}` } });
+    if (!relResponse.ok) {
+      if (relResponse.status === 401 || relResponse.status === 403) return;
+      throw new Error('Failed to fetch relation');
+    }
     const relData = await relResponse.json();
     const isMe = (username === AppState.currentUser);
 
@@ -38,7 +46,7 @@ async function openProfile(username) {
       } else if (relData.relation === 'pending' && relData.sender === 'them') {
         relButton = `
           <div style="display:flex; gap:5px; flex:1;">
-            <button class="cyber-btn" onclick="handleFriendAction('${username}', 'request')" style="flex:1; border-color:var(--neon-green); color:var(--neon-green); padding: 10px 2px;">[ ACCEPT ]</button>
+            <button class="cyber-btn" onclick="handleFriendAction('${username}', 'accept')" style="flex:1; border-color:var(--neon-green); color:var(--neon-green); padding: 10px 2px;">[ ACCEPT ]</button>
             <button class="cyber-btn" onclick="handleFriendAction('${username}', 'cancel')" style="flex:1; border-color:var(--neon-pink); color:var(--neon-pink); padding: 10px 2px;">[ DECLINE ]</button>
           </div>`;
       } else if (relData.relation === 'friends') {
@@ -74,8 +82,8 @@ async function openProfile(username) {
             ${actionButtonsHtml}
             <div class="profile-field" style="margin-top:15px; font-family:var(--font-tech); font-size:11px; color:var(--text-muted); display:flex; justify-content:space-between;">
               <span>📅 JOINED: ${new Date(profileData.created_at).toLocaleDateString('vi-VN')}</span>
-<span style="color:${profileData.isBlockedReal ? 'var(--text-muted)' : 'var(--neon-green)'}">● ${(profileData.lastseentext || profileData.lastSeenText || 'OFFLINE').toUpperCase()}</span>            
-</div>
+              <span style="color:${profileData.isBlockedReal ? 'var(--text-muted)' : 'var(--neon-green)'}">● ${(profileData.lastseentext || profileData.lastSeenText || 'OFFLINE').toUpperCase()}</span>            
+            </div>
             ${isMe ? `<button class="cyber-btn" onclick="saveProfileBio()" style="width:100%; margin-top:10px; padding:10px;">LƯU THÔNG TIN PROFILE</button>
             <button class="cyber-btn" id="profile-theme-toggle-btn" onclick="toggleTheme()" style="width:100%; margin-top:8px; padding:10px; border-color:var(--text-muted); color:var(--text-muted); font-size:10px;">${document.body.classList.contains('light-theme') ? '🌙 DARK MODE' : '☀️ LIGHT MODE'}</button>` : ''}
           </div>
@@ -95,6 +103,10 @@ async function handleBlockAction(targetUser) {
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${AppState.token}` },
       body: JSON.stringify({ target: targetUser })
     });
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) return;
+      throw new Error('Block failed');
+    }
     const resData = await response.json();
     alert(resData.message);
     openProfile(targetUser);
@@ -109,6 +121,10 @@ async function handleUnblockAction(targetUser) {
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${AppState.token}` },
       body: JSON.stringify({ target: targetUser })
     });
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) return;
+      throw new Error('Unblock failed');
+    }
     const resData = await response.json();
     alert(resData.message);
     openProfile(targetUser);
@@ -118,46 +134,39 @@ async function handleUnblockAction(targetUser) {
 
 // Hàm xử lý tương tác Kết bạn / Hủy bạn
 async function handleFriendAction(targetUser, actionType) {
-  const url = actionType === 'request' ? '/api/friends/request' : '/api/friends/cancel';
-  const method = actionType === 'request' ? 'POST' : 'DELETE';
-  const bodyData = actionType === 'request' ? { receiver: targetUser } : { target: targetUser };
-
   try {
-    const response = await fetch(url, {
-      method: method,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${AppState.token}`
-      },
-      body: JSON.stringify(bodyData)
-    });
-    const resData = await response.json();
-    alert(resData.message || 'Thao tác liên kết thành công');
+    // ✅ GUARD: Không cho tự accept lời mời của chính mình
+    if (actionType === 'accept') {
+      const relRes = await fetch(`/api/friends/status/${encodeURIComponent(targetUser)}`, {
+        headers: { 'Authorization': `Bearer ${AppState.token}` }
+      });
+      if (relRes.ok) {
+        const relData = await relRes.json();
+        if (relData.sender === 'me') {
+          alert('Bạn không thể tự chấp nhận lời mời của chính mình!');
+          return;
+        }
+      }
+    }
 
-    // Refresh lại chính modal để cập nhật trạng thái nút bấm mới ngay lập tức
-    openProfile(targetUser);
-    if (typeof loadUsers === 'function') loadUsers();
-  } catch (e) {
-    console.error(e);
-  }
-}
-
-// Hàm xử lý chặn (Block)
-async function handleBlockAction(targetUser) {
-  if (!confirm(`Bạn có chắc chắn muốn ngắt kết nối mạng lưới và chặn Node [${targetUser.toUpperCase()}] không?`)) return;
-
-  try {
-    const response = await fetch('/api/block', {
+    const response = await fetch('/api/users/friend-action', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${AppState.token}`
       },
-      body: JSON.stringify({ target: targetUser })
+      body: JSON.stringify({
+        targetUser: targetUser,
+        action: actionType
+      })
     });
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) return;
+      throw new Error('Friend action failed');
+    }
     const resData = await response.json();
-    alert(resData.message);
-    closeProfileModal();
+    alert(resData.message || 'Thao tác liên kết thành công');
+    openProfile(targetUser);
     if (typeof loadUsers === 'function') loadUsers();
   } catch (e) {
     console.error(e);
@@ -174,51 +183,46 @@ function closeProfileModal() {
 // ==========================================
 function openInternalLightbox(event, src) {
   if (event) {
-    event.stopPropagation(); // Chặn đứng không cho lan ra Home
+    event.stopPropagation();
     event.preventDefault();
   }
 
-  // Tìm xem đã có Lightbox nội bộ chưa, chưa có thì tự sinh ra ngay bên trong document
   let internalOverlay = document.getElementById('internal-profile-lightbox');
   if (!internalOverlay) {
     internalOverlay = document.createElement('div');
     internalOverlay.id = 'internal-profile-lightbox';
-    // Ép CSS trực tiếp: z-index cực đại (999999) để đè bẹp Lớp 2 và Lớp 1
     internalOverlay.style = `
-            display: none; 
-            position: fixed; 
-            top: 0; left: 0; 
-            width: 100vw; height: 100vh; 
-            background: rgba(4, 4, 6, 0.98); 
-            z-index: 999999; 
-            justify-content: center; 
-            align-items: center; 
-            cursor: zoom-out;
-        `;
+      display: none; 
+      position: fixed; 
+      top: 0; left: 0; 
+      width: 100vw; height: 100vh; 
+      background: rgba(4, 4, 6, 0.98); 
+      z-index: 999999; 
+      justify-content: center; 
+      align-items: center; 
+      cursor: zoom-out;
+    `;
 
-    // Khi click vào vùng đen thì TẮT LỚP 3, giữ nguyên Lớp 2, không động chạm gì vào Home
     internalOverlay.onclick = function (e) {
       internalOverlay.style.display = 'none';
     };
 
     internalOverlay.innerHTML = `
-            <button class="cyber-btn" style="position: absolute; top: 20px; right: 20px; border-color: var(--neon-pink); padding: 8px 16px; font-size: 11px; min-width: auto; cursor: pointer;">CLOSE [X]</button>
-            <img id="internal-lightbox-img" src="" style="max-width: 90%; max-height: 90%; border: 2px solid var(--neon-cyan); box-shadow: 0 0 30px rgba(0, 240, 255, 0.3); object-fit: contain; width: auto; height: auto;">
-        `;
+      <button class="cyber-btn" style="position: absolute; top: 20px; right: 20px; border-color: var(--neon-pink); padding: 8px 16px; font-size: 11px; min-width: auto; cursor: pointer;">CLOSE [X]</button>
+      <img id="internal-lightbox-img" src="" style="max-width: 90%; max-height: 90%; border: 2px solid var(--neon-cyan); box-shadow: 0 0 30px rgba(0, 240, 255, 0.3); object-fit: contain; width: auto; height: auto;">
+    `;
     document.body.appendChild(internalOverlay);
   }
 
   const img = document.getElementById('internal-lightbox-img');
   if (img) {
     img.src = src;
-    // Chặn nổi bọt khi click trúng bức ảnh phóng to
     img.onclick = function (e) { e.stopPropagation(); };
   }
 
   internalOverlay.style.display = 'flex';
 }
 
-// XỬ LÝ EDIT #1: Upload và cập nhật Avatar (Gửi yêu cầu PUT lên server)
 async function handleAvatarUpload(event) {
   const file = event.target.files[0];
   if (!file) return;
@@ -242,9 +246,11 @@ async function handleAvatarUpload(event) {
         body: JSON.stringify({ avatar: base64Data })
       });
 
-      if (!response.ok) throw new Error('Cập nhật dữ liệu thất bại');
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) return;
+        throw new Error('Cập nhật dữ liệu thất bại');
+      }
 
-      // Cập nhật nóng ảnh hiển thị tức thì trên Modal
       const displayBox = document.getElementById('profile-avatar-display');
       if (displayBox) {
         displayBox.innerHTML = `<img src="${base64Data}" id="profile-avatar-img" onclick="openInternalLightbox(event, this.src)" style="width:100%; height:100%; border-radius:4px; object-fit:cover; cursor:pointer;">`;
@@ -264,7 +270,6 @@ function handleProfileUpdate(event) {
   handleAvatarUpload(event);
 }
 
-// XỬ LÝ EDIT #2: Lưu nội dung Text Bio (Tiểu sử)
 async function saveProfileBio() {
   const bioInput = document.getElementById('profile-bio-input');
   if (!bioInput) return;
@@ -281,7 +286,10 @@ async function saveProfileBio() {
       body: JSON.stringify({ bio: bioValue })
     });
 
-    if (!response.ok) throw new Error('Không thể đồng bộ cơ sở dữ liệu');
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) return;
+      throw new Error('Không thể đồng bộ cơ sở dữ liệu');
+    }
 
     alert('Đã cập nhật tiểu sử cá nhân thành công!');
     closeProfileModal();

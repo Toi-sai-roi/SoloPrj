@@ -21,7 +21,10 @@ async function openGroupChat(groupId) {
     const res = await fetch(`/api/groups/${groupId}`, {
       headers: { 'Authorization': `Bearer ${AppState.token}` }
     });
-    if (!res.ok) throw new Error('Cannot load group');
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) return; // handleAuthError đã xử lý
+      throw new Error('Cannot load group');
+    }
     const group = await res.json();
 
     AppState.activeGroupData = group;
@@ -287,13 +290,15 @@ async function submitCreateGroup() {
       body: JSON.stringify({ name, description, members })
     });
 
-    const result = await res.json();
     if (!res.ok) {
+      if (res.status === 401 || res.status === 403) return; // handleAuthError đã xử lý
+      const result = await res.json();
       errorEl.textContent = result.error || 'LỖI TẠO NHÓM';
       errorEl.style.display = 'block';
       return;
     }
 
+    const result = await res.json();
     closeCreateGroupModal();
     // Chuyển sang group chat mới tạo
     openGroupChat(result.groupId);
@@ -319,6 +324,10 @@ async function openGroupSettings(groupId) {
     const res = await fetch(`/api/groups/${groupId}`, {
       headers: { 'Authorization': `Bearer ${AppState.token}` }
     });
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) return; // handleAuthError đã xử lý
+      throw new Error('Failed');
+    }
     const group = await res.json();
     const isAdmin = group.myRole === 'admin';
 
@@ -400,8 +409,12 @@ async function kickGroupMember(groupId, username) {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${AppState.token}` }
     });
-    if (res.ok) openGroupSettings(groupId);
-    else alert('Kick thất bại');
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) return; // handleAuthError đã xử lý
+      alert('Kick thất bại');
+      return;
+    }
+    openGroupSettings(groupId);
   } catch { alert('Lỗi kết nối'); }
 }
 
@@ -417,8 +430,13 @@ async function inviteToGroup(groupId) {
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${AppState.token}` },
       body: JSON.stringify({ username })
     });
-    if (res.ok) openGroupSettings(groupId);
-    else { const d = await res.json(); alert(d.error || 'Thất bại'); }
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) return; // handleAuthError đã xử lý
+      const d = await res.json();
+      alert(d.error || 'Thất bại');
+      return;
+    }
+    openGroupSettings(groupId);
   } catch { alert('Lỗi kết nối'); }
 }
 
@@ -429,10 +447,14 @@ async function leaveGroup(groupId) {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${AppState.token}` }
     });
-    if (res.ok) {
-      closeGroupSettings();
-      exitGroupChat();
-    } else { const d = await res.json(); alert(d.error || 'Thất bại'); }
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) return; // handleAuthError đã xử lý
+      const d = await res.json();
+      alert(d.error || 'Thất bại');
+      return;
+    }
+    closeGroupSettings();
+    exitGroupChat();
   } catch { alert('Lỗi kết nối'); }
 }
 
@@ -443,9 +465,13 @@ async function deleteGroup(groupId) {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${AppState.token}` }
     });
-    if (res.ok) {
-      closeGroupSettings();
-      exitGroupChat();
-    } else { const d = await res.json(); alert(d.error || 'Thất bại'); }
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) return; // handleAuthError đã xử lý
+      const d = await res.json();
+      alert(d.error || 'Thất bại');
+      return;
+    }
+    closeGroupSettings();
+    exitGroupChat();
   } catch { alert('Lỗi kết nối'); }
 }

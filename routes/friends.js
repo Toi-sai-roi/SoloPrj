@@ -29,12 +29,12 @@ router.post('/request', authenticateToken, async (req, res) => {
     const u2 = sender < receiver ? receiver : sender;
 
     const existing = await query(`
-      SELECT * FROM friends WHERE user_one = $1 AND user_two = $2
+      SELECT * FROM friends WHERE user1 = $1 AND user2 = $2
     `, [u1, u2]);
 
     if (existing.rows.length === 0) {
       await query(`
-        INSERT INTO friends (user_one, user_two, status, sender) 
+        INSERT INTO friends (user1, user2, status, sender) 
         VALUES ($1, $2, 'pending', $3)
       `, [u1, u2, sender]);
 
@@ -84,7 +84,7 @@ router.get('/status/:target', authenticateToken, async (req, res) => {
 
     const result = await query(`
       SELECT status, sender FROM friends 
-      WHERE user_one = $1 AND user_two = $2
+      WHERE user1 = $1 AND user2 = $2
     `, [u1, u2]);
 
     if (result.rows.length === 0) {
@@ -98,7 +98,7 @@ router.get('/status/:target', authenticateToken, async (req, res) => {
 
     res.json({
       relation: 'pending',
-      sender: row.user_one === me ? 'me' : 'them'
+      sender: row.sender === me ? 'me' : 'them'
     });
 
   } catch (err) {
@@ -117,7 +117,7 @@ router.delete('/cancel', authenticateToken, async (req, res) => {
     const u2 = me < target ? target : me;
 
     await query(`
-      DELETE FROM friends WHERE user_one = $1 AND user_two = $2
+      DELETE FROM friends WHERE user1 = $1 AND user2 = $2
     `, [u1, u2]);
 
     res.json({ success: true, message: 'Connection cancelled' });

@@ -41,6 +41,10 @@ async function checkChatLockState(targetUser) {
     const res = await fetch(`/api/friends/status/${encodeURIComponent(targetUser)}`, {
       headers: { 'Authorization': `Bearer ${AppState.token}` }
     });
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) return; // handleAuthError đã xử lý
+      throw new Error('Failed');
+    }
     const relData = await res.json();
     const inputField = document.getElementById('chat-input-field');
     const sendBtn = document.getElementById('chat-send-btn');
@@ -309,9 +313,15 @@ function initWebSocket() {
             // Reload group data nhẹ nhàng
             fetch(`/api/groups/${data.groupId}`, {
               headers: { 'Authorization': `Bearer ${AppState.token}` }
-            }).then(r => r.json()).then(group => {
-              if (metaEl) metaEl.textContent = `${group.members.length} NODES`;
-              AppState.activeGroupData = group;
+            }).then(r => {
+              if (!r.ok) {
+                if (r.status === 401 || r.status === 403) return null; // handleAuthError đã xử lý
+                throw new Error('Failed');
+              }
+              return r.json();
+            }).then(group => {
+              if (group && metaEl) metaEl.textContent = `${group.members.length} NODES`;
+              if (group) AppState.activeGroupData = group;
             }).catch(() => { });
           }
           if (AppState.currentUsersTab === 'groups' && typeof loadAndRenderGroups === 'function') {
@@ -537,7 +547,10 @@ async function handleMediaSelect(event) {
       body: formData
     });
 
-    if (!res.ok) throw new Error('Upload failed');
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) return; // handleAuthError đã xử lý
+      throw new Error('Upload failed');
+    }
     const data = await res.json();
 
     // Lưu URL vào AppState thay vì base64
@@ -831,4 +844,3 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
-
