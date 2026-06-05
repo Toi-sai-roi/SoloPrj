@@ -43,6 +43,7 @@ app.use(helmet({
 }));
 
 app.use(cors());
+app.set('trust proxy', 1);
 app.use(compression());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));

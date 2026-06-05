@@ -21,8 +21,8 @@ router.get('/', authenticateToken, async (req, res) => {
         END as online,
         CASE 
           WHEN f.status = 'accepted' THEN 'friend'
-          WHEN f.status = 'pending' AND f.sender = $1 THEN 'pending_sent'
-          WHEN f.status = 'pending' AND f.sender != $1 THEN 'pending_received'
+          WHEN f.status = 'pending' AND f.user_one = $1 THEN 'pending_sent'
+          WHEN f.status = 'pending' AND f.user_one != $1 THEN 'pending_received'
           ELSE 'none'
         END as relation
       FROM users u
@@ -39,7 +39,7 @@ router.get('/', authenticateToken, async (req, res) => {
         LIMIT 1
       ) b ON TRUE
       LEFT JOIN LATERAL (
-        SELECT status, sender
+        SELECT status, sender, user_one, user_two
         FROM friends
         WHERE (user_one = $1 AND user_two = u.username)
            OR (user_one = u.username AND user_two = $1)

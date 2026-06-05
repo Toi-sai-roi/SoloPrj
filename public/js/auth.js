@@ -18,8 +18,8 @@ function switchAuthTab(mode) {
 async function handleAuthSubmit(e) {
   e.preventDefault();
 
-  const authErrorMsg  = document.getElementById('auth-error-msg');
-  const authSpinner   = document.getElementById('auth-spinner');
+  const authErrorMsg = document.getElementById('auth-error-msg');
+  const authSpinner = document.getElementById('auth-spinner');
   const authSubmitBtn = document.getElementById('auth-submit-btn');
 
   authErrorMsg.style.display = 'none';
@@ -38,7 +38,11 @@ async function handleAuthSubmit(e) {
     });
 
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Lỗi mạng không xác định');
+    if (!response.ok) {
+      // Ưu tiên message từ backend, fallback sang error code
+      const errorMsg = data.message || data.error || 'Lỗi mạng không xác định';
+      throw new Error(errorMsg);
+    }
 
     // Lưu token & username vào state toàn cục (app.js)
     AppState.token = data.token;
@@ -55,7 +59,18 @@ async function handleAuthSubmit(e) {
     initWebSocket();
 
   } catch (err) {
-    authErrorMsg.textContent = `LỖI PROTOCOL: ${err.message.toUpperCase()}`;
+    // Kiểm tra nếu là lỗi từ server với message cụ thể
+    let errorMessage = err.message;
+
+    if (err.message === 'NODE_NOT_FOUND') {
+      errorMessage = 'NODE KHÔNG TỒN TẠI TRONG MẠNG LƯỚI';
+    } else if (err.message === 'ACCESS_DENIED') {
+      errorMessage = 'MÃ XÁC THỰC KHÔNG CHÍNH XÁC';
+    } else if (err.message === 'Invalid credentials') {
+      errorMessage = 'THÔNG TIN XÁC THỰC KHÔNG HỢP LỆ';
+    }
+
+    authErrorMsg.textContent = `LỖI PROTOCOL: ${errorMessage.toUpperCase()}`;
     authErrorMsg.style.display = 'block';
   } finally {
     authSpinner.style.display = 'none';

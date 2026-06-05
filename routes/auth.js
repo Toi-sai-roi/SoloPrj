@@ -64,7 +64,10 @@ router.post('/login', async (req, res) => {
     const user = result.rows[0];
 
     if (!user) {
-      return res.status(400).json({ error: 'Invalid credentials' });
+      return res.status(400).json({ 
+        error: 'NODE_NOT_FOUND',
+        message: 'Tài khoản không tồn tại trong mạng lưới' 
+      });
     }
 
     let valid = false;
@@ -80,7 +83,10 @@ router.post('/login', async (req, res) => {
     }
 
     if (!valid) {
-      return res.status(400).json({ error: 'Invalid credentials' });
+      return res.status(400).json({ 
+        error: 'ACCESS_DENIED',
+        message: 'Mã xác thực không chính xác' 
+      });
     }
 
     // If legacy hash, re-hash with bcrypt for next time
