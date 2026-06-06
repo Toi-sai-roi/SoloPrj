@@ -196,6 +196,61 @@ h1, h2, h3, button { font-family: var(--font-tech); letter-spacing: 0.08em; }
   100% { box-shadow: 0 0 0 0 rgba(0,255,136,0); }
 }
 
+/* 1. BIG RED PULSING DOT */
+.status-dot.unread {
+  width: 12px !important;
+  height: 12px !important;
+  background: var(--accent-pink) !important;
+  box-shadow: 
+    0 0 8px var(--accent-pink),
+    0 0 20px var(--accent-pink),
+    0 0 40px rgba(255, 0, 128, 0.4) !important;
+  animation: pulse-unread 1.2s ease-in-out infinite !important;
+}
+
+@keyframes pulse-unread {
+  0%, 100% {
+    box-shadow: 0 0 8px var(--accent-pink), 0 0 20px var(--accent-pink), 0 0 40px rgba(255,0,128,0.4);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 12px var(--accent-pink), 0 0 30px var(--accent-pink), 0 0 60px rgba(255,0,128,0.6);
+    transform: scale(1.15);
+  }
+}
+
+/* 2. CARD GLOWS WHEN UNREAD */
+.user-card.has-unread {
+  border-color: var(--accent-pink) !important;
+  box-shadow: 
+    0 0 15px rgba(255, 0, 128, 0.15),
+    0 0 30px rgba(255, 0, 128, 0.08),
+    inset 0 0 20px rgba(255, 0, 128, 0.03) !important;
+  animation: card-unread-glow 2s ease-in-out infinite !important;
+}
+
+.user-card.has-unread .user-name {
+  color: var(--accent-pink) !important;
+  text-shadow: 0 0 8px rgba(255, 0, 128, 0.3) !important;
+}
+
+@keyframes card-unread-glow {
+  0%, 100% {
+    box-shadow: 
+      0 0 15px rgba(255, 0, 128, 0.15),
+      0 0 30px rgba(255, 0, 128, 0.08),
+      inset 0 0 20px rgba(255, 0, 128, 0.03);
+    border-color: rgba(255, 0, 128, 0.4);
+  }
+  50% {
+    box-shadow: 
+      0 0 25px rgba(255, 0, 128, 0.25),
+      0 0 50px rgba(255, 0, 128, 0.12),
+      inset 0 0 30px rgba(255, 0, 128, 0.06);
+    border-color: rgba(255, 0, 128, 0.7);
+  }
+}
+
 /* ── 9. SPINNER ─────────────────────────────────────────────── */
 .spinner {
   border: 2px solid rgba(255,255,255,0.06);
@@ -1508,3 +1563,4 @@ body.light-theme .user-card:hover .user-name {
 body.light-theme .auth-container {
   animation: lt-panel-breathe 4s ease-in-out infinite;
 }
+

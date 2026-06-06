@@ -1,6 +1,6 @@
 // =========================================================================
-// chat.js — Version 3.4 Production Ready (Optimized + Cyberpunk Block Logic)
-// WebSocket + Chat Room logic + Reactions + Typing + Read Receipt + Block Check
+// chat.js — Version 3.5 (Unread Notification + Reply/Quote + Delete + Pin + Search + Wallpaper + Animation)
+// WebSocket + Chat Room logic + Reactions + Typing + Read Receipt + Block Check + Unread Counts
 // =========================================================================
 
 let typingTimeout = null;
@@ -11,20 +11,15 @@ function getTopReactions(reactionMap, reactionTimestamps = {}) {
   if (!reactionMap || Object.keys(reactionMap).length === 0) return [];
 
   const values = Object.values(reactionMap);
-  
-  // Detect format: nếu value là số -> đã tổng hợp { "👍": 2 }
-  // Nếu value là string emoji -> raw format { "userId": "👍" }
   const isAggregated = typeof values[0] === 'number';
 
   const emojiStats = {};
 
   if (isAggregated) {
-    // Format từ history/server: { "👍": 2, "❤️": 1 }
     for (const [emoji, count] of Object.entries(reactionMap)) {
       emojiStats[emoji] = { count: Number(count), lastTimestamp: parseInt(reactionTimestamps[emoji]) || 0 };
     }
   } else {
-    // Format raw từ WS: { "userId": "👍" }
     for (const [userId, emoji] of Object.entries(reactionMap)) {
       if (!emojiStats[emoji]) emojiStats[emoji] = { count: 0, lastTimestamp: 0 };
       emojiStats[emoji].count++;
@@ -46,7 +41,7 @@ async function checkChatLockState(targetUser) {
       headers: { 'Authorization': `Bearer ${AppState.token}` }
     });
     if (!res.ok) {
-      if (res.status === 401 || res.status === 403) return; // handleAuthError đã xử lý
+      if (res.status === 401 || res.status === 403) return;
       throw new Error('Failed');
     }
     const relData = await res.json();
@@ -65,7 +60,6 @@ async function checkChatLockState(targetUser) {
         inputField.value = "";
         if (sendBtn) sendBtn.disabled = true;
       } else {
-        // Mở khóa nếu trạng thái bình thường (Bạn bè, pending, hoặc chưa kết nối)
         inputField.disabled = false;
         inputField.placeholder = "ENTER MESSAGE...";
         if (sendBtn) sendBtn.disabled = false;
@@ -87,6 +81,12 @@ function initWebSocket() {
   AppState.ws.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data);
+
+      // 🔥 DEBUG: Log all WS messages
+      if (data.type !== 'typing' && data.type !== 'group_typing') {
+        console.log('[WS RECEIVED]', data.type, data);
+      }
+
       switch (data.type) {
 
         case 'status_change': {
@@ -104,36 +104,27 @@ function initWebSocket() {
         }
 
         case 'network_update': {
-          // Data nhận về từ server mẫu: { type: 'network_update', sender: 'binh', action: 'add' }
           const targetUser = data.sender;
-          const actionType = data.action; // 'add', 'accept', 'cancel'
-
-          // Tìm Node của đối phương trong bộ nhớ máy mình để cập nhật trạng thái hiển thị
+          const actionType = data.action;
           const idx = AppState.usersData.findIndex(u => u.username === targetUser);
 
           if (idx !== -1) {
             console.log(`[WS NETWORK]: Nhận tín hiệu tương tác từ ${targetUser} -> Action: ${actionType}`);
 
-            // Phân loại logic để gán relation tương ứng cho máy người nhận:
             if (actionType === 'add') {
-              // Đối phương gửi add mình -> trạng thái của mình đối với họ là "đang chờ nhận"
               AppState.usersData[idx].relation = 'pending_received';
             }
             else if (actionType === 'accept') {
-              // Đối phương đồng ý -> chính thức thành bạn bè
               AppState.usersData[idx].relation = 'friend';
             }
             else if (actionType === 'cancel') {
-              // Đối phương hủy lời mời / từ chối / unfriend -> đưa về mặc định
               AppState.usersData[idx].relation = 'none';
             }
 
-            // Gọi hàm render gốc tại users.js để cập nhật giao diện và tiếng chuông/nút bấm lập tức
             if (typeof renderUsersList === 'function') {
               renderUsersList();
             }
 
-            // TÙY CHỌN: Hiệu ứng nhấp nháy đèn hoặc tạo âm thanh Cyberpunk báo hiệu có lời mời
             if (actionType === 'add' && typeof glowNotification === 'function') {
               glowNotification(targetUser);
             }
@@ -142,23 +133,17 @@ function initWebSocket() {
         }
 
         case 'system': {
-          // 1. Nếu là tin nhắn hệ thống thông báo bị đối phương chặn (ACCESS_DENIED)
           if (data.text.includes('ACCESS_DENIED')) {
-            // Render dòng chữ thông báo lỗi ra giữa khung chat
             appendSystemMessage(data.text);
-
-            // Tìm ô nhập liệu và nút gửi để khóa cứng lại
             const inputField = document.getElementById('chat-input-field');
             const sendBtn = document.getElementById('chat-send-btn');
             if (inputField) {
               inputField.disabled = true;
               inputField.placeholder = "BẠN ĐÃ BỊ CHẶN KẾT NỐI ĐẾN NODE NÀY...";
-              inputField.value = ""; // Xóa sạch chữ đang gõ dở
+              inputField.value = "";
             }
             if (sendBtn) sendBtn.disabled = true;
-          }
-          // 2. Các thông báo hệ thống thông thường (Ví dụ: ai đó đăng nhập/đăng xuất mạng lưới)
-          else {
+          } else {
             if (AppState.activeChatPartner && data.text.includes(AppState.activeChatPartner)) {
               appendSystemMessage(data.text);
             }
@@ -199,18 +184,38 @@ function initWebSocket() {
           break;
         }
 
+        // 🔥 UNREAD COUNTS FROM SERVER
+        case 'unread_counts': {
+          console.log('[UNREAD] Received counts:', data.counts);
+          AppState.unreadCounts = data.counts || {};
+          console.log('[UNREAD] AppState.unreadCounts now:', AppState.unreadCounts);
+          if (typeof renderUsersList === 'function') {
+            renderUsersList();
+            console.log('[UNREAD] renderUsersList() called');
+          }
+          break;
+        }
+
         case 'message': {
           const isFromPartner = data.sender === AppState.activeChatPartner;
           const isToPartner = data.receiver === AppState.activeChatPartner;
+
           if (isFromPartner || isToPartner) {
             appendChatMessage(data);
-
-            // Khắc phục hạt sạn #4 (Tối ưu): Nếu nhận được tin nhắn từ đối phương khi đang mở sẵn khung chat, 
-            // tự động phát tín hiệu 'get_history' để kích hoạt read receipt báo cho họ biết mình đã đọc ngay lập tức.
             if (isFromPartner && AppState.ws && AppState.ws.readyState === WebSocket.OPEN) {
               AppState.ws.send(JSON.stringify({ type: 'get_history', with: AppState.activeChatPartner }));
             }
           } else {
+            // Message from someone else while not in their chat
+            console.log('[UNREAD] New message from', data.sender, '- not active chat');
+            if (!AppState.unreadCounts[data.sender]) {
+              AppState.unreadCounts[data.sender] = 0;
+            }
+            AppState.unreadCounts[data.sender]++;
+            console.log('[UNREAD] Updated counts:', AppState.unreadCounts);
+            if (typeof renderUsersList === 'function') {
+              renderUsersList();
+            }
             glowNotification(data.sender);
           }
           break;
@@ -242,7 +247,6 @@ function initWebSocket() {
           if (AppState.activeGroup === data.groupId) {
             appendGroupMessage(data);
           } else {
-            // Notification nếu đang không ở nhóm đó
             if (typeof loadAndRenderGroups === 'function' && AppState.currentUsersTab === 'groups') {
               loadAndRenderGroups();
             }
@@ -275,11 +279,9 @@ function initWebSocket() {
         }
 
         case 'group_invite': {
-          // Nhận được lời mời vào nhóm
           if (confirm(`Bạn được mời vào nhóm "${data.groupName}" bởi ${data.invitedBy}. Mở chat nhóm ngay?`)) {
             openGroupChat(data.groupId);
           }
-          // Reload groups tab nếu đang xem
           if (AppState.currentUsersTab === 'groups' && typeof loadAndRenderGroups === 'function') {
             loadAndRenderGroups();
           }
@@ -311,15 +313,13 @@ function initWebSocket() {
         case 'group_member_joined':
         case 'group_member_left':
         case 'group_updated': {
-          // Cập nhật thông tin nhóm đang mở
           if (AppState.activeGroup === data.groupId) {
             const metaEl = document.getElementById('group-chat-meta');
-            // Reload group data nhẹ nhàng
             fetch(`/api/groups/${data.groupId}`, {
               headers: { 'Authorization': `Bearer ${AppState.token}` }
             }).then(r => {
               if (!r.ok) {
-                if (r.status === 401 || r.status === 403) return null; // handleAuthError đã xử lý
+                if (r.status === 401 || r.status === 403) return null;
                 throw new Error('Failed');
               }
               return r.json();
@@ -518,8 +518,6 @@ function openChatWith(username) {
   }
 
   hideTypingIndicator();
-
-  // 🔥 TÍCH HỢP VỊ TRÍ 2: Thực hiện quét kiểm tra trạng thái Block từ API ngay khi vừa click mở chat
   checkChatLockState(username);
 }
 
@@ -540,7 +538,6 @@ async function handleMediaSelect(event) {
     return;
   }
 
-  // Upload lên server trước
   const formData = new FormData();
   formData.append('file', file);
 
@@ -552,17 +549,15 @@ async function handleMediaSelect(event) {
     });
 
     if (!res.ok) {
-      if (res.status === 401 || res.status === 403) return; // handleAuthError đã xử lý
+      if (res.status === 401 || res.status === 403) return;
       throw new Error('Upload failed');
     }
     const data = await res.json();
 
-    // Lưu URL vào AppState thay vì base64
-    AppState.selectedMedia = data.url;  // URL: /uploads/filename
+    AppState.selectedMedia = data.url;
     AppState.selectedMediaType = file.type;
     AppState.selectedMediaName = file.name;
 
-    // Preview
     const previewContainer = document.getElementById('media-preview-container');
     const previewWrapper = document.getElementById('media-preview-wrapper');
     const previewName = document.getElementById('media-preview-name');
@@ -574,7 +569,7 @@ async function handleMediaSelect(event) {
     previewWrapper.innerHTML = '';
     if (file.type.startsWith('image/')) {
       const img = document.createElement('img');
-      img.src = data.url;  // Dùng URL server
+      img.src = data.url;
       img.style.width = '100%';
       img.style.height = '100%';
       img.style.objectFit = 'cover';
@@ -602,9 +597,8 @@ function handleSendMessage(e) {
   if (!text && !AppState.selectedMedia) return;
 
   if (AppState.ws && AppState.ws.readyState === WebSocket.OPEN) {
-    // Gửi media + text (hoặc chỉ media)
     if (AppState.selectedMedia) {
-      console.log('Sending media:', AppState.selectedMedia);  // log để debug
+      console.log('Sending media:', AppState.selectedMedia);
       AppState.ws.send(JSON.stringify({
         type: 'send_message',
         to: AppState.activeChatPartner,
@@ -612,9 +606,7 @@ function handleSendMessage(e) {
         media_url: AppState.selectedMedia
       }));
       clearMediaSelection();
-    }
-    // Gửi text-only
-    else if (text) {
+    } else if (text) {
       AppState.ws.send(JSON.stringify({
         type: 'send_message',
         to: AppState.activeChatPartner,
@@ -648,7 +640,6 @@ function appendChatMessage(msg) {
 
   let bubbleContent = '';
 
-  // Check media_url trước (mới)
   if (msg.media_url && msg.media_url.trim() !== '') {
     if (msg.media_url.match(/\.(jpg|jpeg|png|gif|webp)$/i) || msg.media_url.startsWith('data:image/')) {
       bubbleContent = `<img src="${msg.media_url}" class="chat-media-img" onclick="openLightbox(this.src)" title="Nhấp để phóng to" alt="Ảnh đính kèm">`;
@@ -658,9 +649,7 @@ function appendChatMessage(msg) {
       const filename = msg.media_url.split('/').pop();
       bubbleContent = `<a href="${msg.media_url}" download="${filename}" class="chat-file-link">📎 ${filename}</a>`;
     }
-  }
-  // Fallback: base64 trong text (cũ)
-  else if (msg.text && msg.text.startsWith('data:')) {
+  } else if (msg.text && msg.text.startsWith('data:')) {
     if (msg.text.startsWith('data:image/')) {
       bubbleContent = `<img src="${msg.text}" class="chat-media-img" onclick="openLightbox(this.src)" title="Nhấp để phóng to" alt="Ảnh đính kèm">`;
     } else if (msg.text.startsWith('data:video/')) {
@@ -668,9 +657,7 @@ function appendChatMessage(msg) {
     } else {
       bubbleContent = `<a href="${msg.text}" download="file" class="chat-file-link">📎 Tải file</a>`;
     }
-  }
-  // Plain text
-  else {
+  } else {
     bubbleContent = escapeHTML(msg.text || '');
   }
 
@@ -718,7 +705,6 @@ function appendChatMessage(msg) {
   `;
   messagesArea.appendChild(wrapper);
   scrollToBottom();
-
 }
 
 function sendTypingStop() {

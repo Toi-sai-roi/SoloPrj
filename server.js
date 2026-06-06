@@ -113,13 +113,12 @@ const onlineUsers = new Map();
 async function trackOnlineUser(username, isOnline) {
   try {
     if (isOnline) {
-      // Kiểm tra user tồn tại trong DB trước khi insert
       const userCheck = await query('SELECT 1 FROM users WHERE username = $1', [username]);
       if (userCheck.rows.length === 0) {
         console.log(`[WS] User ${username} not found in DB, skipping online tracking`);
         return;
       }
-      
+
       await query(`
         INSERT INTO online_users (username, connected_at)
         VALUES ($1, CURRENT_TIMESTAMP)
@@ -145,6 +144,27 @@ async function initOnlineUsersTable() {
     await query('DELETE FROM online_users');
   } catch (err) {
     console.error('Init online_users error:', err);
+  }
+}
+
+// 🔥 NEW: Ensure messages table has read_at column
+async function ensureMessagesReadAtColumn() {
+  try {
+    const colCheck = await query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'messages' AND column_name = 'read_at'
+    `);
+
+    if (colCheck.rows.length === 0) {
+      console.log('[DB] Adding read_at column to messages table...');
+      await query(`ALTER TABLE messages ADD COLUMN read_at TIMESTAMPTZ`);
+      console.log('[DB] read_at column added successfully');
+    } else {
+      console.log('[DB] read_at column already exists');
+    }
+  } catch (err) {
+    console.error('[DB] Error ensuring read_at column:', err);
   }
 }
 
@@ -216,6 +236,38 @@ async function updateLastSeen(username) {
   }
 }
 
+// 🔥 Get unread counts for a user (grouped by sender)
+async function getUnreadCounts(username) {
+  try {
+    const result = await query(`
+      SELECT sender, COUNT(*) as count
+      FROM messages
+      WHERE receiver = $1 AND read_at IS NULL
+      GROUP BY sender
+      ORDER BY count DESC
+    `, [username]);
+
+    const counts = {};
+    result.rows.forEach(row => {
+      counts[row.sender] = parseInt(row.count);
+    });
+    return counts;
+  } catch (err) {
+    console.error('Get unread counts error:', err);
+    return {};
+  }
+}
+
+// 🔥 Broadcast unread counts to a user
+async function broadcastUnreadCounts(username) {
+  const counts = await getUnreadCounts(username);
+  console.log(`[UNREAD] Broadcasting to ${username}:`, counts);
+  broadcastToUser(username, {
+    type: 'unread_counts',
+    counts: counts
+  });
+}
+
 // WebSocket connection handler
 wss.on('connection', async (wsConn, req) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -230,8 +282,7 @@ wss.on('connection', async (wsConn, req) => {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     username = decoded.username;
-    
-    // KIỂM TRA USER TỒN TẠI TRONG DB
+
     const userCheck = await query('SELECT 1 FROM users WHERE username = $1', [username]);
     if (userCheck.rows.length === 0) {
       console.log(`[WS] Rejecting connection: User ${username} not found in DB`);
@@ -256,6 +307,11 @@ wss.on('connection', async (wsConn, req) => {
     broadcastStatusChange(username, true);
     broadcastSystemMessage(`${username} đã đăng nhập vào mạng lưới.`);
   }
+
+  // 🔥 Send unread counts immediately after connect (with slight delay to ensure client ready)
+  setTimeout(async () => {
+    await broadcastUnreadCounts(username);
+  }, 500);
 
   let isAlive = true;
   wsConn.on('pong', () => {
@@ -290,6 +346,9 @@ wss.on('connection', async (wsConn, req) => {
 
         await markMessagesRead(withUser, username);
         broadcastToUser(withUser, { type: 'read_receipt', reader: username, with: withUser });
+
+        // 🔥 Update unread counts after marking read
+        await broadcastUnreadCounts(username);
 
         const history = await query(`
           SELECT 
@@ -364,6 +423,8 @@ wss.on('connection', async (wsConn, req) => {
 
         if (isReceiverOnline) {
           broadcastToUser(to, chatMsg);
+          // 🔥 Update unread counts for receiver after sending message
+          await broadcastUnreadCounts(to);
         }
 
         wsConn.send(JSON.stringify({ ...chatMsg, self: true }));
@@ -597,6 +658,7 @@ const PORT = process.env.PORT || 3000;
 
 async function start() {
   await initOnlineUsersTable();
+  await ensureMessagesReadAtColumn();  // 🔥 Auto-add read_at if missing
 
   server.listen(PORT, () => {
     console.log(`====================================================`);

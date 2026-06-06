@@ -11,7 +11,8 @@ const AppState = {
   activeChatPartner: null,
   activeGroup: null,
   activeGroupData: null,
-  ws: null
+  ws: null,
+  unreadCounts: {}  // 🔥 NEW: Initialize unread counts
 };
 
 // === AUTO LOGOUT KHI AUTH FAIL ===

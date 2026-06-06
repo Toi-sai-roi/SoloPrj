@@ -1,5 +1,5 @@
 // ==========================================
-// js/users.js — Fetch, render, search users
+// js/users.js — Fetch, render, search users + STRONG Unread Notification
 // ==========================================
 
 async function loadUsers() {
@@ -9,7 +9,7 @@ async function loadUsers() {
     });
 
     if (!response.ok) {
-      if (response.status === 401 || response.status === 403) return; // handleAuthError đã xử lý
+      if (response.status === 401 || response.status === 403) return;
       throw new Error('Không thể fetch dữ liệu users');
     }
 
@@ -21,7 +21,6 @@ async function loadUsers() {
 }
 
 function renderUsersList(filteredUsers = null) {
-  // 1. Khởi tạo tab mặc định nếu chưa có
   if (typeof AppState.currentUsersTab === 'undefined') {
     AppState.currentUsersTab = 'all';
   }
@@ -29,7 +28,6 @@ function renderUsersList(filteredUsers = null) {
   const list = filteredUsers || AppState.usersData || [];
   let displayUsers = list.filter(u => u.username !== AppState.currentUser);
 
-  // 2. LỌC NGAY TỪ TRONG MẢNG DỮ LIỆU (Không dùng CSS ẩn hiện thẻ sau khi render nữa)
   if (AppState.currentUsersTab === 'friends') {
     displayUsers = displayUsers.filter(u => u.relation === 'friend');
   }
@@ -41,7 +39,6 @@ function renderUsersList(filteredUsers = null) {
   if (!container) return;
   container.innerHTML = '';
 
-  // 3. ĐẾM VÀ QUẢN LÝ ĐĨA BAY CHUẨN XÁC THEO MẢNG DỮ LIỆU THỰC TẾ
   if (displayUsers.length === 0) {
     if (blankState) blankState.style.setProperty('display', 'flex', 'important');
     if (countEl) {
@@ -55,20 +52,20 @@ function renderUsersList(filteredUsers = null) {
     countEl.textContent = `${displayUsers.length} ${AppState.currentUsersTab === 'friends' ? 'FRIENDS' : 'NODES'}`;
   }
 
-  // 4. RENDER VÀ CHÈN NÚT ĐỒNG THỜI (BẢO TOÀN 100% CẤU TRÚC V4 GỐC)
   displayUsers.forEach(user => {
     const card = document.createElement('div');
-    card.className = 'user-card glass-panel';
 
-    // Click vào card mở chat (giữ nguyên v4)
+    // 🔥 UNREAD: Check if this user has unread messages
+    const hasUnread = AppState.unreadCounts && AppState.unreadCounts[user.username] > 0;
+
+    // Card class: add 'has-unread' for strong glow effect
+    card.className = hasUnread ? 'user-card glass-panel has-unread' : 'user-card glass-panel';
     card.onclick = () => openChatWith(user.username);
 
-    // Logic avatar súp lơ phát sáng (giữ nguyên v4)
     const avatarContent = user.avatar
       ? `<img src="${user.avatar}" class="user-avatar-img" style="width:100%; height:100%; border-radius:inherit; object-fit:cover; display:block;">`
       : user.username.charAt(0).toUpperCase();
 
-    // Tính toán nút bấm mạng lưới dựa trên quan hệ dữ liệu thực tế
     let actionBtnHtml = '';
     const relation = user.relation || 'none';
 
@@ -87,7 +84,9 @@ function renderUsersList(filteredUsers = null) {
       actionBtnHtml = `<button class="cyber-btn cyan-alt" style="padding:4px 8px; font-size:9px; min-width:auto; height:auto; line-height:1; font-family:var(--font-tech);" onclick="event.stopPropagation(); handleFriendRequestAction('${user.username}', 'add')">ADD FRIEND</button>`;
     }
 
-    // Thiết lập flexbox để dồn nút và dấu chấm sang bên phải gọn gàng như trong ảnh cap
+    // Dot: if unread → big red pulsing, else normal online/offline
+    const dotClass = hasUnread ? 'status-dot unread' : `status-dot ${user.online ? 'online' : 'offline'}`;
+
     card.style.display = 'flex';
     card.style.alignItems = 'center';
     card.style.justifyContent = 'space-between';
@@ -99,12 +98,12 @@ function renderUsersList(filteredUsers = null) {
         </div>
         <div class="user-name" title="${user.username}">${user.username}</div>
       </div>
-      
+
       <div style="display:flex; align-items:center; gap:12px;" onclick="event.stopPropagation();">
         <div class="cyber-network-action-area">
           ${actionBtnHtml}
         </div>
-        <span class="status-dot ${user.online ? 'online' : 'offline'}" id="status-dot-${user.username}" style="position:static; margin:0;"></span>
+        <span class="${dotClass}" id="status-dot-${user.username}" style="position:static; margin:0;"></span>
       </div>
     `;
 
@@ -112,7 +111,6 @@ function renderUsersList(filteredUsers = null) {
   });
 }
 
-// 5. HÀM CHUYỂN TAB CHUẨN ĐỒNG BỘ
 function switchUsersTab(tabName) {
   AppState.currentUsersTab = tabName;
 
@@ -142,23 +140,19 @@ function switchUsersTab(tabName) {
 async function handleFriendRequestAction(targetUser, actionType) {
   console.log(`[NETWORK ACTION]: Tiến hành ${actionType} với user: ${targetUser}`);
 
-  // 1. TRẢI NGHIỆM LẬP TỨC (Optimistic UI): Đổi nút ngay lập tức, không đợi API phản hồi
   const userIdx = AppState.usersData.findIndex(u => u.username === targetUser);
-  let backupRelation = 'none'; // Biến dự phòng để hoàn tác nếu API thất bại
+  let backupRelation = 'none';
 
   if (userIdx !== -1) {
     backupRelation = AppState.usersData[userIdx].relation || 'none';
 
-    // Giả lập trạng thái quan hệ mới trong bộ nhớ RAM của client
     if (actionType === 'add') AppState.usersData[userIdx].relation = 'pending_sent';
     else if (actionType === 'accept') AppState.usersData[userIdx].relation = 'friend';
     else if (actionType === 'cancel') AppState.usersData[userIdx].relation = 'none';
 
-    // Vẽ lại giao diện ngay tức thì
     renderUsersList();
   }
 
-  // 2. BẮN REQUEST LÊN SERVER ĐỂ ĐỒNG BỘ VÀO DATABASE
   try {
     const response = await fetch('/api/users/friend-action', {
       method: 'POST',
@@ -168,18 +162,17 @@ async function handleFriendRequestAction(targetUser, actionType) {
       },
       body: JSON.stringify({
         targetUser: targetUser,
-        action: actionType // Gửi lên 'add', 'accept', hoặc 'cancel'
+        action: actionType
       })
     });
 
     if (!response.ok) {
-      if (response.status === 401 || response.status === 403) return; // handleAuthError đã xử lý
+      if (response.status === 401 || response.status === 403) return;
       throw new Error('Server gặp sự cố hoặc từ chối xử lý');
     }
 
     const result = await response.json();
 
-    // Nếu Backend trả về dữ liệu relation mới cập nhật chuẩn từ DB, cập nhật lại lần nữa cho chắc
     if (userIdx !== -1 && result.data && result.data.relation) {
       AppState.usersData[userIdx].relation = result.data.relation;
       renderUsersList();
@@ -188,7 +181,6 @@ async function handleFriendRequestAction(targetUser, actionType) {
   } catch (err) {
     console.error('Lỗi tương tác mạng lưới kết bạn:', err);
 
-    // NẾU LỖI (Mất mạng, sập server...): Hoàn tác (Rollback) giao diện về nút cũ để tránh lừa dối người dùng
     if (userIdx !== -1) {
       AppState.usersData[userIdx].relation = backupRelation;
       renderUsersList();
@@ -203,6 +195,7 @@ function filterUsers() {
   const filtered = AppState.usersData.filter(u => u.username.toLowerCase().includes(term));
   renderUsersList(filtered);
 }
+
 // Search filter
 document.getElementById('search-input').addEventListener('input', function () {
   const term = this.value.trim().toLowerCase();
@@ -230,7 +223,7 @@ async function loadAndRenderGroups() {
       headers: { 'Authorization': `Bearer ${AppState.token}` }
     });
     if (!res.ok) {
-      if (res.status === 401 || res.status === 403) return; // handleAuthError đã xử lý
+      if (res.status === 401 || res.status === 403) return;
       throw new Error('Failed');
     }
     const groups = await res.json();
@@ -307,18 +300,17 @@ function glowNotification(sender) {
 // Matrix rain — light mode hover
 function initMatrixRain() {
   if (!document.body.classList.contains('light-theme')) return;
-  
+
   const chars = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789';
-  
+
   document.querySelectorAll('.user-card').forEach(card => {
     if (card._matrix) return;
     card._matrix = true;
-    
+
     const rain = document.createElement('div');
     rain.className = 'matrix-rain';
     card.appendChild(rain);
-    
-    // Tạo 15 cột ký tự rơi
+
     for (let i = 0; i < 15; i++) {
       const span = document.createElement('span');
       span.textContent = chars[Math.floor(Math.random() * chars.length)];

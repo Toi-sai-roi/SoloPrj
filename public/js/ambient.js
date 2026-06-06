@@ -150,7 +150,7 @@
     setTimeout(function loop() {
       triggerLightning();
       setTimeout(loop, 8000);
-    }, 7100);
+    }, 7110);
   }
 
   // ── PUBLIC API ────────────────────────────────────────────
