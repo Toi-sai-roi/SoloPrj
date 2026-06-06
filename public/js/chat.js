@@ -1,18 +1,19 @@
 // =========================================================================
-// chat.js — Version 3.5 (Unread Notification + Reply/Quote + Delete + Pin + Search + Wallpaper + Animation)
-// WebSocket + Chat Room logic + Reactions + Typing + Read Receipt + Block Check + Unread Counts
+// chat.js — v2.1-fix (Fixed: reply_info render, no auto get_history reload)
 // =========================================================================
 
 let typingTimeout = null;
 let currentReactionMessageId = null;
+let replyingTo = null;
+let currentPinnedMessage = null;
+let currentSearchResults = [];
+let currentWallpaper = null;
+let wallpaperOpacity = 15;
 
-// Helper: Lấy top 3 reactions mới nhất (giống Zalo)
 function getTopReactions(reactionMap, reactionTimestamps = {}) {
   if (!reactionMap || Object.keys(reactionMap).length === 0) return [];
-
   const values = Object.values(reactionMap);
   const isAggregated = typeof values[0] === 'number';
-
   const emojiStats = {};
 
   if (isAggregated) {
@@ -34,7 +35,6 @@ function getTopReactions(reactionMap, reactionTimestamps = {}) {
     .map(([emoji, stats]) => ({ emoji, count: stats.count }));
 }
 
-// 🔥 TÍCH HỢP VỊ TRÍ 1: Hàm kiểm tra trạng thái quan hệ song phương và khóa/mở khóa ô chat
 async function checkChatLockState(targetUser) {
   try {
     const res = await fetch(`/api/friends/status/${encodeURIComponent(targetUser)}`, {
@@ -82,11 +82,6 @@ function initWebSocket() {
     try {
       const data = JSON.parse(event.data);
 
-      // 🔥 DEBUG: Log all WS messages
-      if (data.type !== 'typing' && data.type !== 'group_typing') {
-        console.log('[WS RECEIVED]', data.type, data);
-      }
-
       switch (data.type) {
 
         case 'status_change': {
@@ -107,27 +102,12 @@ function initWebSocket() {
           const targetUser = data.sender;
           const actionType = data.action;
           const idx = AppState.usersData.findIndex(u => u.username === targetUser);
-
           if (idx !== -1) {
-            console.log(`[WS NETWORK]: Nhận tín hiệu tương tác từ ${targetUser} -> Action: ${actionType}`);
-
-            if (actionType === 'add') {
-              AppState.usersData[idx].relation = 'pending_received';
-            }
-            else if (actionType === 'accept') {
-              AppState.usersData[idx].relation = 'friend';
-            }
-            else if (actionType === 'cancel') {
-              AppState.usersData[idx].relation = 'none';
-            }
-
-            if (typeof renderUsersList === 'function') {
-              renderUsersList();
-            }
-
-            if (actionType === 'add' && typeof glowNotification === 'function') {
-              glowNotification(targetUser);
-            }
+            if (actionType === 'add') AppState.usersData[idx].relation = 'pending_received';
+            else if (actionType === 'accept') AppState.usersData[idx].relation = 'friend';
+            else if (actionType === 'cancel') AppState.usersData[idx].relation = 'none';
+            if (typeof renderUsersList === 'function') renderUsersList();
+            if (actionType === 'add' && typeof glowNotification === 'function') glowNotification(targetUser);
           }
           break;
         }
@@ -184,15 +164,9 @@ function initWebSocket() {
           break;
         }
 
-        // 🔥 UNREAD COUNTS FROM SERVER
         case 'unread_counts': {
-          console.log('[UNREAD] Received counts:', data.counts);
           AppState.unreadCounts = data.counts || {};
-          console.log('[UNREAD] AppState.unreadCounts now:', AppState.unreadCounts);
-          if (typeof renderUsersList === 'function') {
-            renderUsersList();
-            console.log('[UNREAD] renderUsersList() called');
-          }
+          if (typeof renderUsersList === 'function') renderUsersList();
           break;
         }
 
@@ -201,22 +175,61 @@ function initWebSocket() {
           const isToPartner = data.receiver === AppState.activeChatPartner;
 
           if (isFromPartner || isToPartner) {
+            // 🔥 FIX: Just append the new message, DON'T reload entire history
             appendChatMessage(data);
-            if (isFromPartner && AppState.ws && AppState.ws.readyState === WebSocket.OPEN) {
-              AppState.ws.send(JSON.stringify({ type: 'get_history', with: AppState.activeChatPartner }));
-            }
+            scrollToBottom();
           } else {
             // Message from someone else while not in their chat
-            console.log('[UNREAD] New message from', data.sender, '- not active chat');
             if (!AppState.unreadCounts[data.sender]) {
               AppState.unreadCounts[data.sender] = 0;
             }
             AppState.unreadCounts[data.sender]++;
-            console.log('[UNREAD] Updated counts:', AppState.unreadCounts);
-            if (typeof renderUsersList === 'function') {
-              renderUsersList();
-            }
+            if (typeof renderUsersList === 'function') renderUsersList();
             glowNotification(data.sender);
+          }
+          break;
+        }
+
+        case 'message_deleted': {
+          const msgEl = document.querySelector(`.msg-wrapper[data-message-id="${data.messageId}"]`);
+          if (msgEl) {
+            msgEl.classList.add('msg-deleted');
+            const bubble = msgEl.querySelector('.msg-bubble');
+            if (bubble) {
+              bubble.innerHTML = '<div class="msg-text-data deleted-text">[TIN NHẮN ĐÃ BỊ XÓA]</div>';
+            }
+            const actions = msgEl.querySelector('.msg-actions');
+            if (actions) actions.remove();
+          }
+
+          // 🔥 FIX: Nếu tin nhắn bị xóa đang là pinned thì ẩn pinned bar
+          if (currentPinnedMessage && currentPinnedMessage.id == data.messageId) {
+            hidePinnedBar();
+          }
+          break;
+        }
+
+        case 'pin_update': {
+          const { conversation, pinned_message } = data;
+          // Check if this pin update is for current conversation
+          const isCurrentConvo =
+            (conversation.user1 === AppState.currentUser && conversation.user2 === AppState.activeChatPartner) ||
+            (conversation.user1 === AppState.activeChatPartner && conversation.user2 === AppState.currentUser);
+
+          if (isCurrentConvo) {
+            if (pinned_message) {
+              showPinnedBar(pinned_message);
+            } else {
+              hidePinnedBar();
+            }
+          }
+          break;
+        }
+
+        case 'search_results': {
+          const { with: withUser, query, results } = data;
+          if (withUser === AppState.activeChatPartner) {
+            renderSearchResults(results, query);
           }
           break;
         }
@@ -347,8 +360,6 @@ function initWebSocket() {
   AppState.ws.onerror = (err) => console.error('[WS Error]', err);
 }
 
-// --- Typing Indicator Functions ---
-
 function sendTypingStart() {
   if (!AppState.activeChatPartner) return;
   if (AppState.ws && AppState.ws.readyState === WebSocket.OPEN) {
@@ -359,8 +370,6 @@ function sendTypingStart() {
     }));
   }
 }
-
-// --- Read Receipt Functions ---
 
 function updateMessageStatus(messageId, status) {
   const messageElements = document.querySelectorAll(`.msg-wrapper`);
@@ -388,8 +397,6 @@ function updateAllMessagesStatus(status) {
     }
   });
 }
-
-// --- Reaction Functions (Zalo style) ---
 
 function showReactionPicker(messageId, event) {
   event.stopPropagation();
@@ -497,10 +504,74 @@ function updateMessageReaction(messageId, reactionMapRaw, reactionTimestampsRaw)
   }
 }
 
-// --- Chat Room Functions ---
+// Reply functions
+function startReply(messageId) {
+  const msgEl = document.querySelector(`.msg-wrapper[data-message-id="${messageId}"]`);
+  if (!msgEl) return;
+
+  const sender = msgEl.querySelector('.msg-sender')?.textContent || '';
+  const textEl = msgEl.querySelector('.msg-text-data');
+  let text = '';
+
+  if (textEl) {
+    const clone = textEl.cloneNode(true);
+    const statusSpan = clone.querySelector('.msg-status');
+    if (statusSpan) statusSpan.remove();
+    text = clone.textContent.trim();
+  }
+
+  replyingTo = { id: messageId, sender, text };
+  showReplyIndicator();
+
+  const inputField = document.getElementById('chat-input-field');
+  if (inputField) inputField.focus();
+}
+
+function showReplyIndicator() {
+  let indicator = document.getElementById('reply-indicator');
+  if (!indicator) {
+    indicator = document.createElement('div');
+    indicator.id = 'reply-indicator';
+    indicator.className = 'reply-indicator';
+    const form = document.getElementById('chat-input-form');
+    if (form) form.parentNode.insertBefore(indicator, form);
+  }
+
+  if (replyingTo) {
+    indicator.innerHTML = `
+      <span>↳ REPLYING TO // ${replyingTo.sender.toUpperCase()}: "${replyingTo.text.substring(0, 60)}${replyingTo.text.length > 60 ? '...' : ''}"</span>
+      <span class="reply-cancel" onclick="cancelReply()">✕</span>
+    `;
+    indicator.style.display = 'flex';
+  } else {
+    indicator.style.display = 'none';
+  }
+}
+
+function cancelReply() {
+  replyingTo = null;
+  const indicator = document.getElementById('reply-indicator');
+  if (indicator) indicator.style.display = 'none';
+}
+
+function deleteMessage(messageId) {
+  if (!confirm('XÓA TIN NHẮN? Hành động này không thể hoàn tác.')) return;
+
+  if (currentPinnedMessage && currentPinnedMessage.id == messageId) {
+    unpinCurrentMessage();
+  }
+
+  if (AppState.ws && AppState.ws.readyState === WebSocket.OPEN) {
+    AppState.ws.send(JSON.stringify({
+      type: 'delete_message',
+      messageId: messageId
+    }));
+  }
+}
 
 function openChatWith(username) {
   AppState.activeChatPartner = username;
+  cancelReply();
 
   document.getElementById('chat-partner-name').textContent = `CHAT WITH // ${username.toUpperCase()}`;
   document.getElementById('chat-partner-avatar').textContent = username.charAt(0).toUpperCase();
@@ -520,8 +591,6 @@ function openChatWith(username) {
   hideTypingIndicator();
   checkChatLockState(username);
 }
-
-// --- Media Attachment ---
 
 function triggerMediaInput() {
   document.getElementById('media-input').click();
@@ -597,22 +666,23 @@ function handleSendMessage(e) {
   if (!text && !AppState.selectedMedia) return;
 
   if (AppState.ws && AppState.ws.readyState === WebSocket.OPEN) {
+    const payload = {
+      type: 'send_message',
+      to: AppState.activeChatPartner,
+      text: text || ''
+    };
+
     if (AppState.selectedMedia) {
-      console.log('Sending media:', AppState.selectedMedia);
-      AppState.ws.send(JSON.stringify({
-        type: 'send_message',
-        to: AppState.activeChatPartner,
-        text: text || '',
-        media_url: AppState.selectedMedia
-      }));
+      payload.media_url = AppState.selectedMedia;
       clearMediaSelection();
-    } else if (text) {
-      AppState.ws.send(JSON.stringify({
-        type: 'send_message',
-        to: AppState.activeChatPartner,
-        text: text
-      }));
     }
+
+    if (replyingTo) {
+      payload.reply_to = replyingTo.id;
+      cancelReply();
+    }
+
+    AppState.ws.send(JSON.stringify(payload));
 
     field.value = '';
     field.focus();
@@ -620,8 +690,6 @@ function handleSendMessage(e) {
     if (typingTimeout) clearTimeout(typingTimeout);
   }
 }
-
-// --- Render Helpers ---
 
 function appendChatMessage(msg) {
   const messagesArea = document.getElementById('messages-area');
@@ -634,13 +702,16 @@ function appendChatMessage(msg) {
   if (blankState) blankState.remove();
 
   const isSelf = msg.sender === AppState.currentUser || msg.self;
+  const isDeleted = msg.deleted_at || msg.text === '[TIN NHẮN ĐÃ BỊ XÓA]';
   const wrapper = document.createElement('div');
-  wrapper.className = `msg-wrapper ${isSelf ? 'self' : 'other'}`;
+  wrapper.className = `msg-wrapper ${isSelf ? 'self' : 'other'} ${isDeleted ? 'msg-deleted' : ''}`;
   wrapper.setAttribute('data-message-id', msg.id);
 
   let bubbleContent = '';
 
-  if (msg.media_url && msg.media_url.trim() !== '') {
+  if (isDeleted) {
+    bubbleContent = '<span class="deleted-text">[TIN NHẮN ĐÃ BỊ XÓA]</span>';
+  } else if (msg.media_url && msg.media_url.trim() !== '') {
     if (msg.media_url.match(/\.(jpg|jpeg|png|gif|webp)$/i) || msg.media_url.startsWith('data:image/')) {
       bubbleContent = `<img src="${msg.media_url}" class="chat-media-img" onclick="openLightbox(this.src)" title="Nhấp để phóng to" alt="Ảnh đính kèm">`;
     } else if (msg.media_url.match(/\.(mp4|webm|mov)$/i) || msg.media_url.startsWith('data:video/')) {
@@ -662,7 +733,7 @@ function appendChatMessage(msg) {
   }
 
   let statusIcon = '';
-  if (isSelf) {
+  if (isSelf && !isDeleted) {
     if (msg.read_at) {
       statusIcon = '<span class="msg-status read" data-id="' + msg.id + '">✓✓💙</span>';
     } else if (msg.delivered) {
@@ -672,11 +743,25 @@ function appendChatMessage(msg) {
     }
   }
 
+  // Reply quote block
+  let replyHtml = '';
+  if (msg.reply_to && msg.reply_info && !isDeleted) {
+    const replyInfo = typeof msg.reply_info === 'string' ? JSON.parse(msg.reply_info) : msg.reply_info;
+    if (replyInfo) {
+      replyHtml = `
+        <div class="msg-reply-quote" onclick="scrollToMessage(${replyInfo.id})">
+          <div class="reply-sender">↳ ${replyInfo.sender}</div>
+          <div class="reply-text">${escapeHTML(replyInfo.text || '[Không có nội dung]')}</div>
+        </div>
+      `;
+    }
+  }
+
   let reactionMap = typeof msg.reactions === 'string' ? JSON.parse(msg.reactions) : (msg.reactions || {});
   let reactionTimestamps = typeof msg.reaction_timestamps === 'string' ? JSON.parse(msg.reaction_timestamps) : (msg.reaction_timestamps || {});
 
   let reactionsRowHtml = '';
-  if (Object.keys(reactionMap).length > 0) {
+  if (Object.keys(reactionMap).length > 0 && !isDeleted) {
     const topReactions = getTopReactions(reactionMap, reactionTimestamps);
     if (topReactions.length > 0) {
       reactionsRowHtml = '<div class="reactions-row">';
@@ -692,11 +777,46 @@ function appendChatMessage(msg) {
     }
   }
 
+  let actionButtonsHtml = '';
+  if (isSelf && !isDeleted) {
+    actionButtonsHtml = `
+    <div class="msg-actions" style="display:flex;gap:4px;align-items:center;">
+      <button class="msg-action-btn reply-btn" onclick="event.stopPropagation(); startReply(${msg.id})" style="display:inline-flex;align-items:center;gap:4px;">
+        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"></polyline><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg>
+        REPLY
+      </button>
+      <button class="msg-action-btn pin-btn" onclick="event.stopPropagation(); pinMessage(${msg.id})" style="display:inline-flex;align-items:center;gap:4px;">
+        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+        PIN
+      </button>
+      <button class="msg-action-btn delete-btn" onclick="event.stopPropagation(); deleteMessage(${msg.id})" style="display:inline-flex;align-items:center;gap:4px;">
+        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        DELETE
+      </button>
+    </div>
+  `;
+  } else if (!isSelf && !isDeleted) {
+    actionButtonsHtml = `
+    <div class="msg-actions" style="display:flex;gap:4px;align-items:center;">
+      <button class="msg-action-btn reply-btn" onclick="event.stopPropagation(); startReply(${msg.id})" style="display:inline-flex;align-items:center;gap:4px;">
+        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"></polyline><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path></svg>
+        REPLY
+      </button>
+      <button class="msg-action-btn pin-btn" onclick="event.stopPropagation(); pinMessage(${msg.id})" style="display:inline-flex;align-items:center;gap:4px;">
+        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+        PIN
+      </button>
+    </div>
+  `;
+  }
+
   wrapper.innerHTML = `
+    ${actionButtonsHtml}
     <div class="msg-sender">${msg.sender}</div>
     <div class="msg-content-node">
       <div class="reaction-trigger" onclick="event.stopPropagation(); showReactionPicker(${msg.id}, event)">😊</div>
       <div class="msg-bubble">
+        ${replyHtml}
         <div class="msg-text-data">${bubbleContent}${statusIcon}</div>
         ${reactionsRowHtml}
       </div>
@@ -704,7 +824,15 @@ function appendChatMessage(msg) {
     <div class="msg-time">${formatTime(msg.timestamp)}</div>
   `;
   messagesArea.appendChild(wrapper);
-  scrollToBottom();
+}
+
+function scrollToMessage(messageId) {
+  const msgEl = document.querySelector(`.msg-wrapper[data-message-id="${messageId}"]`);
+  if (msgEl) {
+    msgEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    msgEl.style.animation = 'highlightMessage 1s ease';
+    setTimeout(() => { msgEl.style.animation = ''; }, 1000);
+  }
 }
 
 function sendTypingStop() {
@@ -762,6 +890,7 @@ function updateChatPartnerStatus(isOnline) {
 
 function exitChat() {
   AppState.activeChatPartner = null;
+  cancelReply();
   showScreen('home-screen');
   loadUsers();
 }
@@ -815,8 +944,7 @@ function closeLightbox() {
   }, 200);
 }
 
-// --- Typing Event Listener ---
-
+// Typing Event Listener
 document.addEventListener('DOMContentLoaded', () => {
   const inputField = document.getElementById('chat-input-field');
   if (inputField) {
@@ -834,3 +962,432 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
+
+// ==========================================
+// PIN MESSAGE FUNCTIONS
+// ==========================================
+
+function pinMessage(messageId) {
+  if (!AppState.ws || AppState.ws.readyState !== WebSocket.OPEN) return;
+  AppState.ws.send(JSON.stringify({
+    type: 'pin_message',
+    messageId: messageId
+  }));
+}
+
+function unpinCurrentMessage() {
+  if (!AppState.activeChatPartner) return;
+  if (!AppState.ws || AppState.ws.readyState !== WebSocket.OPEN) return;
+
+  AppState.ws.send(JSON.stringify({
+    type: 'unpin_message',
+    withUser: AppState.activeChatPartner
+  }));
+
+  hidePinnedBar();
+}
+
+function requestPinnedMessage() {
+  if (!AppState.activeChatPartner) return;
+  if (!AppState.ws || AppState.ws.readyState !== WebSocket.OPEN) return;
+
+  AppState.ws.send(JSON.stringify({
+    type: 'get_pinned',
+    with: AppState.activeChatPartner
+  }));
+}
+
+function showPinnedBar(message) {
+  const bar = document.getElementById('pinned-bar');
+  const senderEl = document.getElementById('pinned-sender');
+  const textEl = document.getElementById('pinned-text');
+  const navBtn = document.getElementById('pin-nav-btn');
+
+  if (!message) {
+    hidePinnedBar();
+    return;
+  }
+
+  currentPinnedMessage = message;
+
+  let displayText = message.text || '';
+  if (message.media_url) displayText = '📎 Media attachment';
+  if (displayText.length > 60) displayText = displayText.substring(0, 60) + '...';
+
+  senderEl.textContent = message.sender.toUpperCase() + ' //';
+  textEl.textContent = displayText;
+
+  bar.style.display = 'flex';
+  if (navBtn) navBtn.style.display = 'block';
+}
+
+function hidePinnedBar() {
+  const bar = document.getElementById('pinned-bar');
+  const navBtn = document.getElementById('pin-nav-btn');
+  if (bar) bar.style.display = 'none';
+  if (navBtn) navBtn.style.display = 'none';
+  currentPinnedMessage = null;
+}
+
+function scrollToPinnedMessage() {
+  if (!currentPinnedMessage) return;
+  scrollToMessage(currentPinnedMessage.id);
+}
+
+function openPinnedBar() {
+  const bar = document.getElementById('pinned-bar');
+  if (bar) bar.style.display = 'flex';
+}
+
+// ==========================================
+// SEARCH MESSAGE FUNCTIONS
+// ==========================================
+
+function openSearchModal() {
+  const modal = document.getElementById('search-modal');
+  const partnerName = document.getElementById('search-partner-name');
+  const input = document.getElementById('search-input-field');
+  const resultsList = document.getElementById('search-results-list');
+  const countEl = document.getElementById('search-results-count');
+
+  if (!modal) return;
+
+  partnerName.textContent = AppState.activeChatPartner?.toUpperCase() || '';
+  input.value = '';
+  resultsList.innerHTML = '';
+  countEl.textContent = '';
+  currentSearchResults = [];
+
+  modal.style.display = 'flex';
+  setTimeout(() => input.focus(), 100);
+}
+
+function closeSearchModal() {
+  const modal = document.getElementById('search-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function executeSearch() {
+  const input = document.getElementById('search-input-field');
+  const keyword = input.value.trim();
+
+  if (!keyword || !AppState.activeChatPartner) return;
+
+  if (!AppState.ws || AppState.ws.readyState !== WebSocket.OPEN) return;
+
+  AppState.ws.send(JSON.stringify({
+    type: 'search_messages',
+    with: AppState.activeChatPartner,
+    q: keyword
+  }));
+
+  const resultsList = document.getElementById('search-results-list');
+  const countEl = document.getElementById('search-results-count');
+  resultsList.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);font-family:var(--font-tech);font-size:10px;">SCANNING NEURAL ARCHIVES...</div>';
+  countEl.textContent = 'SEARCHING...';
+}
+
+function renderSearchResults(results, query) {
+  const resultsList = document.getElementById('search-results-list');
+  const countEl = document.getElementById('search-results-count');
+
+  currentSearchResults = results;
+
+  if (!results || results.length === 0) {
+    resultsList.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);font-family:var(--font-tech);font-size:10px;">NO MATCHES FOUND IN ARCHIVE</div>';
+    countEl.textContent = '0 RESULTS';
+    return;
+  }
+
+  countEl.textContent = `${results.length} RESULT${results.length > 1 ? 'S' : ''} FOUND`;
+
+  const lowerQuery = query.toLowerCase();
+
+  resultsList.innerHTML = results.map(msg => {
+    let text = escapeHTML(msg.text || '');
+    // Highlight matching text
+    text = text.replace(
+      new RegExp(`(${lowerQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'),
+      '<mark>$1</mark>'
+    );
+
+    const time = formatTime(msg.timestamp);
+    const isMedia = msg.media_url ? '📎 ' : '';
+
+    return `
+      <div class="search-result-item" onclick="jumpToSearchResult(${msg.id})">
+        <div class="search-result-sender">${escapeHTML(msg.sender)} // ${time}</div>
+        <div class="search-result-text">${isMedia}${text}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function jumpToSearchResult(messageId) {
+  closeSearchModal();
+  scrollToMessage(messageId);
+}
+// ==========================================
+// WALLPAPER FUNCTIONS (Feature 4)
+// ==========================================
+
+function openWallpaperModal() {
+  const modal = document.getElementById('wallpaper-modal');
+  if (!modal) return;
+
+  // Load current settings
+  const saved = localStorage.getItem(`wallpaper_${AppState.activeChatPartner}`);
+  if (saved) {
+    const data = JSON.parse(saved);
+    wallpaperOpacity = data.opacity || 15;
+    const opacityInput = document.getElementById('wallpaper-opacity');
+    const opacityVal = document.getElementById('wallpaper-opacity-val');
+    if (opacityInput) opacityInput.value = wallpaperOpacity;
+    if (opacityVal) opacityVal.textContent = wallpaperOpacity + '%';
+
+    // Highlight selected preset
+    document.querySelectorAll('.wallpaper-option').forEach(el => el.classList.remove('selected'));
+    const selected = document.querySelector(`[data-preset="${data.preset}"]`);
+    if (selected) selected.classList.add('selected');
+  }
+
+  modal.style.display = 'flex';
+}
+
+function closeWallpaperModal() {
+  const modal = document.getElementById('wallpaper-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function updateWallpaperOpacity(val) {
+  wallpaperOpacity = parseInt(val);
+  const opacityVal = document.getElementById('wallpaper-opacity-val');
+  if (opacityVal) opacityVal.textContent = val + '%';
+  applyWallpaperOpacity();
+  saveWallpaperSettings();
+}
+
+function applyWallpaperOpacity() {
+  const container = document.getElementById('chat-wallpaper-container');
+  if (container) {
+    container.style.opacity = wallpaperOpacity / 100;
+  }
+}
+
+function setWallpaper(preset) {
+  currentWallpaper = preset;
+
+  // Update UI selection
+  document.querySelectorAll('.wallpaper-option').forEach(el => el.classList.remove('selected'));
+  const selected = document.querySelector(`[data-preset="${preset}"]`);
+  if (selected) selected.classList.add('selected');
+
+  renderWallpaper();
+  saveWallpaperSettings();
+}
+
+function renderWallpaper() {
+  const container = document.getElementById('chat-wallpaper-container');
+  if (!container) return;
+
+  // Clear previous content
+  container.innerHTML = '';
+  container.className = 'chat-wallpaper-layer';
+  container.style.backgroundImage = '';
+  container.style.background = '';
+
+  switch (currentWallpaper) {
+    case 'solid':
+      container.style.background = '#0a0e1a';
+      break;
+
+    case 'grid':
+      container.classList.add('wallpaper-grid');
+      break;
+
+    case 'matrix':
+      container.classList.add('wallpaper-matrix');
+      initMatrixWallpaper(container);
+      break;
+
+    case 'neon':
+      container.classList.add('wallpaper-neon');
+      break;
+
+    case 'custom':
+      const url = localStorage.getItem(`wallpaper_custom_${AppState.activeChatPartner}`);
+      if (url) {
+        container.classList.add('wallpaper-custom');
+        container.style.backgroundImage = `url(${url})`;
+      }
+      break;
+  }
+
+  applyWallpaperOpacity();
+}
+
+function initMatrixWallpaper(container) {
+  const chars = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789';
+  const columnWidth = 20;
+  const columns = Math.max(10, Math.floor(container.offsetWidth / columnWidth));
+
+  for (let i = 0; i < columns; i++) {
+    const span = document.createElement('span');
+    span.className = 'matrix-column';
+    span.style.left = `${i * columnWidth}px`;
+    span.style.animationDuration = `${5 + Math.random() * 10}s`;
+    span.style.animationDelay = `${Math.random() * 5}s`;
+    span.textContent = Array(25).fill(0).map(() => chars[Math.floor(Math.random() * chars.length)]).join('');
+    container.appendChild(span);
+  }
+}
+
+function handleWallpaperUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  if (file.size > 2 * 1024 * 1024) {
+    alert('Image too large. Max 2MB.');
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const url = e.target.result;
+    localStorage.setItem(`wallpaper_custom_${AppState.activeChatPartner}`, url);
+    currentWallpaper = 'custom';
+    renderWallpaper();
+    saveWallpaperSettings();
+  };
+  reader.readAsDataURL(file);
+}
+
+function setWallpaperFromUrl() {
+  const input = document.getElementById('wallpaper-url');
+  const url = input.value.trim();
+  if (!url) return;
+
+  // Validate URL
+  const img = new Image();
+  img.onload = () => {
+    localStorage.setItem(`wallpaper_custom_${AppState.activeChatPartner}`, url);
+    currentWallpaper = 'custom';
+    renderWallpaper();
+    saveWallpaperSettings();
+    input.value = '';
+  };
+  img.onerror = () => {
+    alert('Invalid image URL. Please check and try again.');
+  };
+  img.src = url;
+}
+
+function saveWallpaperSettings() {
+  if (!AppState.activeChatPartner) return;
+  const data = {
+    preset: currentWallpaper,
+    opacity: wallpaperOpacity,
+    timestamp: Date.now()
+  };
+  localStorage.setItem(`wallpaper_${AppState.activeChatPartner}`, JSON.stringify(data));
+}
+
+function loadWallpaperForPartner(partner) {
+  const saved = localStorage.getItem(`wallpaper_${partner}`);
+  if (saved) {
+    const data = JSON.parse(saved);
+    currentWallpaper = data.preset;
+    wallpaperOpacity = data.opacity || 15;
+    renderWallpaper();
+  } else {
+    // Default
+    currentWallpaper = 'solid';
+    wallpaperOpacity = 15;
+    renderWallpaper();
+  }
+}
+
+// ==========================================
+// ANIMATION HELPERS 
+// ==========================================
+
+function animateReactionPop(element) {
+  element.classList.add('new');
+  setTimeout(() => element.classList.remove('new'), 300);
+}
+
+function animateMediaLoad(element) {
+  element.classList.add('loaded');
+}
+
+// Override showTypingIndicator for cyberpunk dots
+function showTypingIndicator() {
+  const statusText = document.getElementById('chat-partner-status-text');
+  if (!statusText) return;
+  if (!statusText.dataset.originalText) {
+    statusText.dataset.originalText = statusText.textContent;
+  }
+  statusText.innerHTML = `
+    <span style="display:flex;align-items:center;gap:6px;">
+      <span class="typing-indicator">
+        <span class="dot"></span>
+        <span class="dot"></span>
+        <span class="dot"></span>
+      </span>
+      <span style="font-family:var(--font-tech);font-size:9px;letter-spacing:1px;">TYPING</span>
+    </span>
+  `;
+  statusText.style.color = 'var(--neon-cyan)';
+  statusText.style.textShadow = '0 0 5px var(--neon-cyan)';
+}
+
+// Override openChatWith to load wallpaper
+const originalOpenChatWith = openChatWith;
+openChatWith = function (username) {
+  originalOpenChatWith(username);
+  // Load wallpaper for this conversation
+  loadWallpaperForPartner(username);
+};
+
+// Override appendChatMessage to add media load animation
+const originalAppendChatMessage = appendChatMessage;
+appendChatMessage = function (msg) {
+  originalAppendChatMessage(msg);
+
+  // Add media load animation
+  const messagesArea = document.getElementById('messages-area');
+  if (!messagesArea) return;
+
+  const lastWrapper = messagesArea.lastElementChild;
+  if (!lastWrapper) return;
+
+  const mediaElements = lastWrapper.querySelectorAll('.chat-media-img, .chat-media-vid');
+  mediaElements.forEach(el => {
+    if (el.complete || el.readyState >= 3) {
+      el.classList.add('loaded');
+    } else {
+      el.addEventListener('load', () => el.classList.add('loaded'));
+      el.addEventListener('error', () => el.classList.add('loaded'));
+    }
+  });
+};
+
+// Override message_deleted handler for fade animation
+const originalWsOnMessage = initWebSocket;
+
+// Add pin bar pulse when showing pinned bar
+const originalShowPinnedBar = showPinnedBar;
+showPinnedBar = function (message) {
+  originalShowPinnedBar(message);
+  const bar = document.getElementById('pinned-bar');
+  if (bar && message) {
+    bar.classList.add('has-pinned');
+  }
+};
+
+const originalHidePinnedBar = hidePinnedBar;
+hidePinnedBar = function () {
+  const bar = document.getElementById('pinned-bar');
+  if (bar) bar.classList.remove('has-pinned');
+  originalHidePinnedBar();
+};

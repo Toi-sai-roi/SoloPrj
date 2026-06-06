@@ -52,7 +52,7 @@
     canvas.style.cssText = `
       position: fixed; top: 0; left: 0;
       width: 100vw; height: 100vh;
-      pointer-events: none; z-index: 100;
+      pointer-events: none; z-index: 10;
     `;
     document.body.appendChild(canvas);
     ctx = canvas.getContext('2d');

@@ -7,7 +7,9 @@
   <title>CYBERPUNK // NEURAL CHAT 1:1</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Orbitron:wght@400;600;800;900&display=swap" rel="stylesheet">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Orbitron:wght@400;600;800;900&display=swap"
+    rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/mobile.css">
 </head>
@@ -25,11 +27,13 @@
       <form id="auth-form" onsubmit="handleAuthSubmit(event)">
         <div class="auth-form-group">
           <label for="auth-username">USERNAME // NEURAL ID</label>
-          <input type="text" id="auth-username" class="cyber-input" placeholder="e.g. Neo101" required autocomplete="username">
+          <input type="text" id="auth-username" class="cyber-input" placeholder="e.g. Neo101" required
+            autocomplete="username">
         </div>
         <div class="auth-form-group">
           <label for="auth-password">PASSWORD // MATRIX KEY</label>
-          <input type="password" id="auth-password" class="cyber-input" placeholder="••••••••" required autocomplete="current-password">
+          <input type="password" id="auth-password" class="cyber-input" placeholder="••••••••" required
+            autocomplete="current-password">
         </div>
         <div id="auth-error-msg" class="auth-error">LỖI XỬ LÝ CHỨNG CHỈ</div>
         <div style="margin-top: 28px; display: flex; align-items: center; justify-content: space-between; gap:16px;">
@@ -57,7 +61,8 @@
           <span>ACTIVE COGNITIVE NODES</span>
           <div style="display:flex;align-items:center;gap:8px;">
             <button id="create-group-btn" class="cyber-btn" onclick="openCreateGroupModal()"
-              style="display:none; padding: 1px 10px; font-size:9px; min-width:auto; height:auto; border-color:var(--neon-purple); color:var(--neon-purple);">+ GROUP</button>
+              style="display:none; padding: 1px 10px; font-size:9px; min-width:auto; height:auto; border-color:var(--neon-purple); color:var(--neon-purple);">+
+              GROUP</button>
             <span id="users-count">0 NODES</span>
           </div>
         </div>
@@ -76,8 +81,7 @@
         </div>
 
         <div class="search-container">
-          <input type="text" id="search-input" class="cyber-input"
-            placeholder="SCAN NODES...">
+          <input type="text" id="search-input" class="cyber-input" placeholder="SCAN NODES...">
         </div>
         <div id="users-list-container" class="users-list"></div>
         <div id="users-blank-state" class="blank-state" style="display: none;">
@@ -106,7 +110,183 @@
             </div>
           </div>
         </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button class="cyber-btn cyan-alt" onclick="openSearchModal()"
+            style="padding:7px 14px;font-size:9px;min-width:auto;display:flex;align-items:center;gap:6px;"
+            title="Search messages">
+            <!-- Icon Kính lúp SVG -->
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+              stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            SEARCH
+          </button>
+          <button class="cyber-btn cyan-alt" onclick="openWallpaperModal()"
+            style="padding:7px 14px;font-size:9px;min-width:auto;display:flex;align-items:center;gap:6px;"
+            title="Change wallpaper">
+            <!-- Icon Palette SVG -->
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+              stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="13.5" cy="6.5" r="0.5" fill="currentColor"></circle>
+              <circle cx="17.5" cy="10.5" r="0.5" fill="currentColor"></circle>
+              <circle cx="8.5" cy="7.5" r="0.5" fill="currentColor"></circle>
+              <circle cx="6.5" cy="12.5" r="0.5" fill="currentColor"></circle>
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10c.82 0 1.57-.2 2.23-.56.67-.37 1.13-.97 1.13-1.72 0-.66-.33-1.26-.88-1.63-.44-.29-.88-.73-.88-1.47 0-.59.35-1.11.88-1.41.53-.3 1.06-.44 1.47-.44.82 0 1.5-.68 1.5-1.5 0-.82-.68-1.5-1.5-1.5-.41 0-.94.14-1.47.44-.53.3-.88.82-.88 1.41 0 .74.44 1.18.88 1.47.55.37.88.97.88 1.63 0 .75-.46 1.35-1.13 1.72-.66.36-1.41.56-2.23.56z"></path>
+            </svg>
+            WALL
+          </button>
+          <button class="cyber-btn" onclick="openPinnedBar()"
+            style="padding:7px 14px;font-size:9px;min-width:auto;border-color:var(--neon-yellow);color:var(--neon-yellow);display:none;align-items:center;gap:6px;"
+            id="pin-nav-btn" title="View pinned">
+            <!-- Icon Ghim SVG -->
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+              <circle cx="12" cy="10" r="3"></circle>
+            </svg>
+            PINNED
+          </button>
+        </div>
       </header>
+      <!-- Pinned Message Bar -->
+      <div id="pinned-bar" class="pinned-message-bar" style="display:none;">
+        <div class="pinned-content" onclick="scrollToPinnedMessage()">
+          <span class="pinned-label">
+            <!-- Icon Ghim nhỏ -->
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+              stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;vertical-align:middle;">
+              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+              <circle cx="12" cy="10" r="3"></circle>
+            </svg>
+            PINNED
+          </span>
+          <span class="pinned-sender" id="pinned-sender"></span>
+          <span class="pinned-text" id="pinned-text"></span>
+        </div>
+        <button class="pinned-close" onclick="unpinCurrentMessage()" title="Unpin">
+          <!-- Icon dấu X đóng dạng SVG tinh tế -->
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+            stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Search Modal -->
+      <div id="search-modal"
+        style="display:none;position:fixed;inset:0;z-index:9001;background:rgba(7,11,20,0.92);backdrop-filter:blur(10px);justify-content:center;align-items:flex-start;padding-top:80px;">
+        <div class="glass-panel" style="width:500px;max-width:90vw;padding:24px;position:relative;">
+          <div
+            style="font-family:var(--font-tech);font-size:13px;color:var(--accent-cyan);letter-spacing:2px;margin-bottom:16px;">
+            SEARCH MESSAGES // <span id="search-partner-name"></span>
+          </div>
+          <div style="display:flex;gap:8px;margin-bottom:16px;">
+            <input type="text" id="search-input-field" class="cyber-input" placeholder="Enter keyword..."
+              style="flex:1;" onkeydown="if(event.key==='Enter')executeSearch()">
+            <button class="cyber-btn" onclick="executeSearch()"
+              style="padding:8px 16px;font-size:10px;min-width:auto;">SCAN</button>
+            <button class="cyber-btn" onclick="closeSearchModal()"
+              style="padding:8px 16px;font-size:10px;min-width:auto;border-color:var(--text-muted);color:var(--text-muted);">CLOSE</button>
+          </div>
+          <div id="search-results-count"
+            style="font-size:10px;color:var(--text-muted);font-family:var(--font-tech);margin-bottom:8px;"></div>
+          <div id="search-results-list"
+            style="max-height:60vh;overflow-y:auto;display:flex;flex-direction:column;gap:6px;"></div>
+        </div>
+      </div>
+
+      <!-- Wallpaper Modal -->
+      <div id="wallpaper-modal"
+        style="display:none;position:fixed;inset:0;z-index:9002;background:rgba(7,11,20,0.9);backdrop-filter:blur(10px);justify-content:center;align-items:center;">
+        <div class="glass-panel" style="width:400px;max-width:90vw;padding:28px;">
+          <div
+            style="font-family:var(--font-tech);font-size:13px;color:var(--accent-cyan);letter-spacing:2px;margin-bottom:20px;">
+            WALLPAPER // AMBIENT CONFIG
+          </div>
+
+          <!-- Presets -->
+          <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:20px;">
+            <div class="wallpaper-option" data-preset="solid" onclick="setWallpaper('solid')">
+              <div
+                style="height:80px;background:#0a0e1a;border-radius:6px;border:2px solid var(--border-card);position:relative;">
+              </div>
+              <div style="font-size:10px;color:var(--text-muted);font-family:var(--font-tech);text-align:center;margin-top:6px;">
+                SOLID</div>
+            </div>
+            <div class="wallpaper-option" data-preset="grid" onclick="setWallpaper('grid')">
+              <div
+                style="height:80px;background:linear-gradient(45deg,#0a0e1a,#1a1f3a);border-radius:6px;border:2px solid var(--neon-cyan);position:relative;overflow:hidden;">
+                <div
+                  style="position:absolute;inset:0;background-image:linear-gradient(rgba(0,243,255,0.1)1px,transparent 1px),linear-gradient(90deg,rgba(0,243,255,0.1)1px,transparent 1px);background-size:20px 20px;">
+                </div>
+              </div>
+              <div
+                style="font-size:10px;color:var(--text-muted);font-family:var(--font-tech);text-align:center;margin-top:6px;">
+                CYBER GRID</div>
+            </div>
+            <div class="wallpaper-option" data-preset="matrix" onclick="setWallpaper('matrix')">
+              <div
+                style="height:80px;background:#000;border-radius:6px;border:2px solid var(--neon-green);position:relative;overflow:hidden;">
+                <div
+                  style="position:absolute;inset:0;font-family:monospace;font-size:8px;color:rgba(57,255,20,0.3);line-height:1.2;overflow:hidden;">
+                  0101...</div>
+              </div>
+              <div
+                style="font-size:10px;color:var(--text-muted);font-family:var(--font-tech);text-align:center;margin-top:6px;">
+                MATRIX</div>
+            </div>
+            <div class="wallpaper-option" data-preset="neon" onclick="setWallpaper('neon')">
+              <div
+                style="height:80px;background:#0a0e1a;border-radius:6px;border:2px solid var(--neon-pink);position:relative;overflow:hidden;">
+                <div
+                  style="position:absolute;width:60px;height:60px;background:radial-gradient(circle,var(--neon-pink),transparent 70%);border-radius:50%;filter:blur(20px);animation:blobMove 8s infinite;">
+                </div>
+              </div>
+              <div
+                style="font-size:10px;color:var(--text-muted);font-family:var(--font-tech);text-align:center;margin-top:6px;">
+                NEON BLOBS</div>
+            </div>
+          </div>
+
+          <!-- Custom upload -->
+          <div style="border-top:1px solid var(--border-subtle);padding-top:16px;">
+            <div
+              style="font-size:10px;color:var(--text-muted);font-family:var(--font-tech);letter-spacing:1px;margin-bottom:10px;">
+              CUSTOM UPLOAD</div>
+            <input type="file" id="wallpaper-upload" accept="image/*" style="display:none;"
+              onchange="handleWallpaperUpload(event)">
+            <div style="display:flex;gap:8px;">
+              <button class="cyber-btn cyan-alt" onclick="document.getElementById('wallpaper-upload').click()"
+                style="flex:1;padding:8px;font-size:10px;">📁 UPLOAD IMAGE</button>
+              <input type="text" id="wallpaper-url" class="cyber-input" placeholder="Or enter image URL..."
+                style="flex:2;padding:8px;font-size:10px;">
+              <button class="cyber-btn" onclick="setWallpaperFromUrl()"
+                style="padding:8px 12px;font-size:10px;min-width:auto;">APPLY</button>
+            </div>
+          </div>
+
+          <!-- Opacity slider -->
+          <div style="margin-top:16px;">
+            <div
+              style="font-size:10px;color:var(--text-muted);font-family:var(--font-tech);letter-spacing:1px;margin-bottom:8px;">
+              OPACITY // <span id="wallpaper-opacity-val">15%</span></div>
+            <input type="range" id="wallpaper-opacity" min="5" max="50" value="15"
+              style="width:100%;accent-color:var(--neon-cyan);" oninput="updateWallpaperOpacity(this.value)">
+          </div>
+
+          <button class="cyber-btn" onclick="closeWallpaperModal()"
+            style="width:100%;margin-top:20px;border-color:var(--text-muted);color:var(--text-muted);">CLOSE</button>
+        </div>
+      </div>
+
+      <!-- Wallpaper layer container -->
+      <div id="chat-wallpaper-container"
+        style="position:absolute;inset:0;z-index:0;pointer-events:none;overflow:hidden;">
+        <!-- Dynamic content injected here -->
+      </div>
+
       <div id="messages-area" class="messages-area"></div>
 
       <!-- File preview -->
@@ -130,8 +310,7 @@
           onchange="handleMediaSelect(event)">
         <button type="button" class="cyber-btn cyan-alt" onclick="triggerMediaInput()"
           style="padding: 11px 16px; min-width: auto; line-height: 1; display: flex; align-items: center; justify-content: center; font-size: 16px;">📎</button>
-        <input type="text" id="chat-input-field" class="cyber-input"
-          autocomplete="off">
+        <input type="text" id="chat-input-field" class="cyber-input" autocomplete="off">
         <button type="submit" class="cyber-btn" style="padding: 11px 22px; min-width: 80px;">SEND</button>
       </form>
 
@@ -140,7 +319,8 @@
         style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(7, 11, 20, 0.96); z-index: 10000; justify-content: center; align-items: center; cursor: zoom-out;"
         onclick="closeLightbox()">
         <button class="cyber-btn"
-          style="position: absolute; top: 20px; right: 20px; border-color: var(--accent-pink); padding: 8px 16px; font-size: 10px; min-width: auto; cursor: pointer;">CLOSE [X]</button>
+          style="position: absolute; top: 20px; right: 20px; border-color: var(--accent-pink); padding: 8px 16px; font-size: 10px; min-width: auto; cursor: pointer;">CLOSE
+          [X]</button>
         <img id="lightbox-img" src="" onclick="event.stopPropagation()">
       </div>
 
@@ -156,41 +336,58 @@
   </div>
 
   <!-- MODAL: Tạo nhóm -->
-  <div id="create-group-modal" style="display:none; position:fixed; inset:0; z-index:9000; background:rgba(7,11,20,0.85); backdrop-filter:blur(8px); justify-content:center; align-items:center;">
+  <div id="create-group-modal"
+    style="display:none; position:fixed; inset:0; z-index:9000; background:rgba(7,11,20,0.85); backdrop-filter:blur(8px); justify-content:center; align-items:center;">
     <div class="glass-panel" style="width:400px; max-width:90vw; padding:28px; position:relative;">
-      <div style="font-family:var(--font-tech); font-size:13px; color:var(--accent-cyan); letter-spacing:2px; margin-bottom:20px;">
+      <div
+        style="font-family:var(--font-tech); font-size:13px; color:var(--accent-cyan); letter-spacing:2px; margin-bottom:20px;">
         CREATE GROUP // NEW NODE CLUSTER
       </div>
       <div style="display:flex; flex-direction:column; gap:14px;">
         <div>
-          <label style="font-size:10px; color:var(--text-muted); font-family:var(--font-tech); letter-spacing:1px;">GROUP NAME *</label>
-          <input type="text" id="group-name-input" class="cyber-input" placeholder="e.g. SECTOR_7_OPS" style="margin-top:6px;" maxlength="50">
+          <label
+            style="font-size:10px; color:var(--text-muted); font-family:var(--font-tech); letter-spacing:1px;">GROUP
+            NAME *</label>
+          <input type="text" id="group-name-input" class="cyber-input" placeholder="e.g. SECTOR_7_OPS"
+            style="margin-top:6px;" maxlength="50">
         </div>
         <div>
-          <label style="font-size:10px; color:var(--text-muted); font-family:var(--font-tech); letter-spacing:1px;">DESCRIPTION</label>
-          <input type="text" id="group-desc-input" class="cyber-input" placeholder="Mô tả nhóm..." style="margin-top:6px;" maxlength="100">
+          <label
+            style="font-size:10px; color:var(--text-muted); font-family:var(--font-tech); letter-spacing:1px;">DESCRIPTION</label>
+          <input type="text" id="group-desc-input" class="cyber-input" placeholder="Mô tả nhóm..."
+            style="margin-top:6px;" maxlength="100">
         </div>
         <div>
-          <label style="font-size:10px; color:var(--text-muted); font-family:var(--font-tech); letter-spacing:1px;">INVITE MEMBERS</label>
-          <div id="group-members-select" style="margin-top:8px; max-height:160px; overflow-y:auto; border:1px solid var(--border-card); border-radius:var(--radius-card); padding:8px; display:flex; flex-direction:column; gap:4px;"></div>
+          <label
+            style="font-size:10px; color:var(--text-muted); font-family:var(--font-tech); letter-spacing:1px;">INVITE
+            MEMBERS</label>
+          <div id="group-members-select"
+            style="margin-top:8px; max-height:160px; overflow-y:auto; border:1px solid var(--border-card); border-radius:var(--radius-card); padding:8px; display:flex; flex-direction:column; gap:4px;">
+          </div>
         </div>
         <div style="display:flex; gap:10px; margin-top:8px;">
           <button class="cyber-btn" onclick="submitCreateGroup()" style="flex:1;">DEPLOY GROUP</button>
-          <button class="cyber-btn" onclick="closeCreateGroupModal()" style="flex:1; border-color:var(--text-muted); color:var(--text-muted);">CANCEL</button>
+          <button class="cyber-btn" onclick="closeCreateGroupModal()"
+            style="flex:1; border-color:var(--text-muted); color:var(--text-muted);">CANCEL</button>
         </div>
-        <div id="create-group-error" style="font-size:10px; color:var(--accent-pink); font-family:var(--font-tech); display:none;"></div>
+        <div id="create-group-error"
+          style="font-size:10px; color:var(--accent-pink); font-family:var(--font-tech); display:none;"></div>
       </div>
     </div>
   </div>
 
   <!-- MODAL: Quản lý nhóm (thêm thành viên, kick, rời) -->
-  <div id="group-settings-modal" style="display:none; position:fixed; inset:0; z-index:9000; background:rgba(7,11,20,0.85); backdrop-filter:blur(8px); justify-content:center; align-items:center;">
-    <div class="glass-panel" style="width:420px; max-width:90vw; padding:28px; position:relative; max-height:80vh; overflow-y:auto;">
-      <div style="font-family:var(--font-tech); font-size:13px; color:var(--accent-cyan); letter-spacing:2px; margin-bottom:20px;">
+  <div id="group-settings-modal"
+    style="display:none; position:fixed; inset:0; z-index:9000; background:rgba(7,11,20,0.85); backdrop-filter:blur(8px); justify-content:center; align-items:center;">
+    <div class="glass-panel"
+      style="width:420px; max-width:90vw; padding:28px; position:relative; max-height:80vh; overflow-y:auto;">
+      <div
+        style="font-family:var(--font-tech); font-size:13px; color:var(--accent-cyan); letter-spacing:2px; margin-bottom:20px;">
         GROUP SETTINGS // NODE CLUSTER CONFIG
       </div>
       <div id="group-settings-content"></div>
-      <button class="cyber-btn" onclick="closeGroupSettings()" style="width:100%; margin-top:16px; border-color:var(--text-muted); color:var(--text-muted);">CLOSE</button>
+      <button class="cyber-btn" onclick="closeGroupSettings()"
+        style="width:100%; margin-top:16px; border-color:var(--text-muted); color:var(--text-muted);">CLOSE</button>
     </div>
   </div>
 
@@ -201,23 +398,30 @@
         <div class="chat-partner-info">
           <button class="cyber-btn cyan-alt" onclick="exitGroupChat()"
             style="padding: 7px 16px; font-size: 10px; margin-right: 4px;">BACK</button>
-          <div id="group-chat-avatar" class="user-avatar" style="width:36px;height:36px;font-size:13px;border-radius:8px;">G</div>
+          <div id="group-chat-avatar" class="user-avatar"
+            style="width:36px;height:36px;font-size:13px;border-radius:8px;">G</div>
           <div style="flex:1;">
             <div id="group-chat-name" class="chat-partner-name">GROUP // SECTOR</div>
-            <div id="group-chat-meta" style="font-size:9px; color:var(--text-muted); font-family:var(--font-tech); letter-spacing:0.1em; margin-top:3px;">0 MEMBERS</div>
+            <div id="group-chat-meta"
+              style="font-size:9px; color:var(--text-muted); font-family:var(--font-tech); letter-spacing:0.1em; margin-top:3px;">
+              0 MEMBERS</div>
           </div>
           <button class="cyber-btn" onclick="openGroupSettings(AppState.activeGroup)"
             style="padding:7px 14px; font-size:9px; min-width:auto; border-color:var(--neon-purple); color:var(--neon-purple);">MANAGE</button>
         </div>
       </header>
       <div id="group-messages-area" class="messages-area"></div>
-      <div id="group-typing-indicator" style="display:none; padding:6px 24px; font-size:10px; color:var(--accent-cyan); font-family:var(--font-tech);"></div>
+      <div id="group-typing-indicator"
+        style="display:none; padding:6px 24px; font-size:10px; color:var(--accent-cyan); font-family:var(--font-tech);">
+      </div>
       <form id="group-chat-input-form" class="chat-input-bar" onsubmit="handleSendGroupMessage(event)">
-        <input type="text" id="group-chat-input-field" class="cyber-input" placeholder="Broadcast to cluster..." autocomplete="off">
+        <input type="text" id="group-chat-input-field" class="cyber-input" placeholder="Broadcast to cluster..."
+          autocomplete="off">
         <button type="submit" class="cyber-btn" style="padding: 11px 22px; min-width: 80px;">SEND</button>
       </form>
     </div>
   </div>
 
 </body>
+
 </html>
