@@ -8,31 +8,35 @@ let currentReactionMessageId = null;
 
 // Helper: Lấy top 3 reactions mới nhất (giống Zalo)
 function getTopReactions(reactionMap, reactionTimestamps = {}) {
-  const emojiStats = {};
-  for (const [userId, emoji] of Object.entries(reactionMap)) {
-    if (!emojiStats[emoji]) {
-      emojiStats[emoji] = { count: 0, lastTimestamp: 0 };
-    }
-    emojiStats[emoji].count++;
+  if (!reactionMap || Object.keys(reactionMap).length === 0) return [];
 
-    // Khắc phục hạt sạn #1: Ép kiểu hẳn hoi để tránh lỗi so sánh String từ SQLite
-    const ts = parseInt(reactionTimestamps[userId]) || 0;
-    if (ts > emojiStats[emoji].lastTimestamp) {
-      emojiStats[emoji].lastTimestamp = ts;
+  const values = Object.values(reactionMap);
+  
+  // Detect format: nếu value là số -> đã tổng hợp { "👍": 2 }
+  // Nếu value là string emoji -> raw format { "userId": "👍" }
+  const isAggregated = typeof values[0] === 'number';
+
+  const emojiStats = {};
+
+  if (isAggregated) {
+    // Format từ history/server: { "👍": 2, "❤️": 1 }
+    for (const [emoji, count] of Object.entries(reactionMap)) {
+      emojiStats[emoji] = { count: Number(count), lastTimestamp: parseInt(reactionTimestamps[emoji]) || 0 };
+    }
+  } else {
+    // Format raw từ WS: { "userId": "👍" }
+    for (const [userId, emoji] of Object.entries(reactionMap)) {
+      if (!emojiStats[emoji]) emojiStats[emoji] = { count: 0, lastTimestamp: 0 };
+      emojiStats[emoji].count++;
+      const ts = parseInt(reactionTimestamps[userId]) || 0;
+      if (ts > emojiStats[emoji].lastTimestamp) emojiStats[emoji].lastTimestamp = ts;
     }
   }
 
-  const sorted = Object.entries(reactionMap)
-    .map(([emoji, count]) => ({
-      emoji,
-      count: Number(count),
-      lastTimestamp: parseInt(reactionTimestamps[emoji]) || 0
-    }))
-    // Ưu tiên các emoji vừa mới được thả lên trên đầu danh sách hiển thị
-    .sort((a, b) => b.lastTimestamp - a.lastTimestamp)
-    .slice(0, 3); // Lấy tối đa top 3 loại emoji xuất hiện gần nhất
-
-  return sorted.map(item => ({ emoji: item.emoji, count: item.count }));
+  return Object.entries(emojiStats)
+    .sort((a, b) => b[1].lastTimestamp - a[1].lastTimestamp)
+    .slice(0, 3)
+    .map(([emoji, stats]) => ({ emoji, count: stats.count }));
 }
 
 // 🔥 TÍCH HỢP VỊ TRÍ 1: Hàm kiểm tra trạng thái quan hệ song phương và khóa/mở khóa ô chat
@@ -63,7 +67,7 @@ async function checkChatLockState(targetUser) {
       } else {
         // Mở khóa nếu trạng thái bình thường (Bạn bè, pending, hoặc chưa kết nối)
         inputField.disabled = false;
-        inputField.placeholder = "Nhập mã lệnh giao tiếp bảo mật...";
+        inputField.placeholder = "ENTER MESSAGE...";
         if (sendBtn) sendBtn.disabled = false;
       }
     }

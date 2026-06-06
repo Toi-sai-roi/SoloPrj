@@ -30,7 +30,7 @@ router.post('/block', authenticateToken, async (req, res) => {
       const u2 = blocker < target ? target : blocker;
 
       await client.query(`
-        DELETE FROM friends WHERE user_one = $1 AND user_two = $2
+        DELETE FROM friends WHERE user1 = $1 AND user2 = $2
       `, [u1, u2]);
 
       await client.query('COMMIT');

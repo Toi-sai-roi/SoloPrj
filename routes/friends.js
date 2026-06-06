@@ -128,4 +128,27 @@ router.delete('/cancel', authenticateToken, async (req, res) => {
   }
 });
 
+// PUT /api/friends/accept
+router.put('/accept', authenticateToken, async (req, res) => {
+  try {
+    const { sender: friendUser } = req.body;
+    const me = req.user.username;
+
+    const u1 = me < friendUser ? me : friendUser;
+    const u2 = me < friendUser ? friendUser : me;
+
+    await query(`
+      UPDATE friends SET status = 'accepted' 
+      WHERE user1 = $1 AND user2 = $2 AND status = 'pending'
+    `, [u1, u2]);
+
+    const { broadcastToUser } = require('../server');
+    broadcastToUser(friendUser, { type: 'network_update', sender: me, action: 'accept' });
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 module.exports = router;

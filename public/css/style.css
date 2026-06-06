@@ -708,7 +708,7 @@ body.light-theme .search-container .cyber-input:focus { border-color: var(--acce
 /* ── 27. REACTIONS ──────────────────────────────────────────── */
 .reactions-row {
   position: absolute; bottom: -12px; right: 12px; left: auto;
-  display: flex; gap: 4px; z-index: 5; pointer-events: auto;
+  display: flex; gap: 4px; z-index: 5; pointer-events: auto; size : 20px;
 }
 .msg-wrapper.self  .reactions-row { flex-direction: row; justify-content: flex-end; }
 .msg-wrapper.other .reactions-row { flex-direction: row-reverse; justify-content: flex-end; }

@@ -1,5 +1,5 @@
 // ==========================================
-// profile.js — User profile & avatar
+// js/profile.js — User profile & avatar
 // ==========================================
 
 // Hàm mở Modal Profile (Lớp 2)
@@ -46,8 +46,8 @@ async function openProfile(username) {
       } else if (relData.relation === 'pending' && relData.sender === 'them') {
         relButton = `
           <div style="display:flex; gap:5px; flex:1;">
-            <button class="cyber-btn" onclick="handleFriendAction('${username}', 'accept')" style="flex:1; border-color:var(--neon-green); color:var(--neon-green); padding: 10px 2px;">[ ACCEPT ]</button>
-            <button class="cyber-btn" onclick="handleFriendAction('${username}', 'cancel')" style="flex:1; border-color:var(--neon-pink); color:var(--neon-pink); padding: 10px 2px;">[ DECLINE ]</button>
+            <button class="cyber-btn" onclick="handleFriendAction('${username}', 'accept')" style="flex:1; border-color:var(--neon-green); color:var(--neon-green); padding: 10px 2px;">ACCEPT</button>
+            <button class="cyber-btn" onclick="handleFriendAction('${username}', 'cancel')" style="flex:1; border-color:var(--neon-pink); color:var(--neon-pink); padding: 10px 2px;">DECLINE</button>
           </div>`;
       } else if (relData.relation === 'friends') {
         relButton = `<button class="cyber-btn" onclick="handleFriendAction('${username}', 'cancel')" style="flex: 1; border-color:var(--neon-purple); color:var(--neon-purple); padding: 10px 5px;">DISCONNECT_NODE</button>`;
@@ -135,37 +135,36 @@ async function handleUnblockAction(targetUser) {
 // Hàm xử lý tương tác Kết bạn / Hủy bạn
 async function handleFriendAction(targetUser, actionType) {
   try {
-    // ✅ GUARD: Không cho tự accept lời mời của chính mình
-    if (actionType === 'accept') {
-      const relRes = await fetch(`/api/friends/status/${encodeURIComponent(targetUser)}`, {
-        headers: { 'Authorization': `Bearer ${AppState.token}` }
-      });
-      if (relRes.ok) {
-        const relData = await relRes.json();
-        if (relData.sender === 'me') {
-          alert('Bạn không thể tự chấp nhận lời mời của chính mình!');
-          return;
-        }
-      }
+    let url, method, body;
+
+    if (actionType === 'request') {
+      url = '/api/friends/request';
+      method = 'POST';
+      body = { receiver: targetUser };
+    } else if (actionType === 'accept') {
+      url = '/api/friends/accept';
+      method = 'PUT';
+      body = { sender: targetUser };
+    } else if (actionType === 'cancel') {
+      url = '/api/friends/cancel';
+      method = 'DELETE';
+      body = { target: targetUser };
     }
 
-    const response = await fetch('/api/users/friend-action', {
-      method: 'POST',
+    const response = await fetch(url, {
+      method,
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${AppState.token}`
       },
-      body: JSON.stringify({
-        targetUser: targetUser,
-        action: actionType
-      })
+      body: JSON.stringify(body)
     });
+
     if (!response.ok) {
       if (response.status === 401 || response.status === 403) return;
       throw new Error('Friend action failed');
     }
-    const resData = await response.json();
-    alert(resData.message || 'Thao tác liên kết thành công');
+
     openProfile(targetUser);
     if (typeof loadUsers === 'function') loadUsers();
   } catch (e) {
@@ -208,7 +207,7 @@ function openInternalLightbox(event, src) {
     };
 
     internalOverlay.innerHTML = `
-      <button class="cyber-btn" style="position: absolute; top: 20px; right: 20px; border-color: var(--neon-pink); padding: 8px 16px; font-size: 11px; min-width: auto; cursor: pointer;">CLOSE [X]</button>
+      <button class="cyber-btn" style="position: absolute; top: 20px; right: 20px; border-color: var(--neon-pink); padding: 8px 16px; font-size: 11px; min-width: auto; cursor: pointer;">CLOSE</button>
       <img id="internal-lightbox-img" src="" style="max-width: 90%; max-height: 90%; border: 2px solid var(--neon-cyan); box-shadow: 0 0 30px rgba(0, 240, 255, 0.3); object-fit: contain; width: auto; height: auto;">
     `;
     document.body.appendChild(internalOverlay);

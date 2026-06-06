@@ -9,6 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Orbitron:wght@400;600;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/mobile.css">
 </head>
 
 <body>
@@ -76,7 +77,7 @@
 
         <div class="search-container">
           <input type="text" id="search-input" class="cyber-input"
-            placeholder="Lọc danh sách người dùng trong sector...">
+            placeholder="SCAN NODES...">
         </div>
         <div id="users-list-container" class="users-list"></div>
         <div id="users-blank-state" class="blank-state" style="display: none;">
@@ -129,7 +130,7 @@
           onchange="handleMediaSelect(event)">
         <button type="button" class="cyber-btn cyan-alt" onclick="triggerMediaInput()"
           style="padding: 11px 16px; min-width: auto; line-height: 1; display: flex; align-items: center; justify-content: center; font-size: 16px;">📎</button>
-        <input type="text" id="chat-input-field" class="cyber-input" placeholder="Truyền dữ liệu lên đường truyền..."
+        <input type="text" id="chat-input-field" class="cyber-input"
           autocomplete="off">
         <button type="submit" class="cyber-btn" style="padding: 11px 22px; min-width: 80px;">SEND</button>
       </form>
