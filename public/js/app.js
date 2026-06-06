@@ -47,6 +47,9 @@ function initTheme() {
     document.body.classList.add('light-theme');
     const btn = document.getElementById('theme-toggle-btn');
     if (btn) btn.textContent = '☀️';
+    setAmbientDark(false); 
+  } else {
+    setAmbientDark(true);  
   }
 }
 
@@ -58,11 +61,13 @@ function toggleTheme() {
     localStorage.setItem('cyber_theme', 'dark');
     if (btn) btn.textContent = '🌙';
     if (profileBtn) profileBtn.textContent = '☀️ LIGHT MODE';
+    setAmbientDark(true);   
   } else {
     document.body.classList.add('light-theme');
     localStorage.setItem('cyber_theme', 'light');
     if (btn) btn.textContent = '☀️';
     if (profileBtn) profileBtn.textContent = '🌙 DARK MODE';
+    setAmbientDark(false);  
   }
   if (typeof closeProfileModal === 'function') closeProfileModal();
 }
