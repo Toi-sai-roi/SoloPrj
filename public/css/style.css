@@ -189,7 +189,7 @@ h1, h2, h3, button { font-family: var(--font-tech); letter-spacing: 0.08em; }
   box-shadow: 0 0 8px var(--accent-green);
   animation: pulse-green 2.2s infinite;
 }
-.status-dot.offline { background: #3A4060; }
+.status-dot.offline { background: #535669; }
 @keyframes pulse-green {
   0%   { box-shadow: 0 0 0 0 rgba(0,255,136,0.7); }
   70%  { box-shadow: 0 0 0 7px rgba(0,255,136,0); }
