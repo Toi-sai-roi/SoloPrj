@@ -1,16 +1,20 @@
 // ==========================================
 // config/db.js — PostgreSQL Configuration
+// v9.1-fix: #11 Guard DB_PASSWORD check cả DATABASE_URL
 // ==========================================
 const { Pool } = require('pg');
 require('dotenv').config();
 
+// FIX #11: Guard phải check cả DATABASE_URL
+if (!process.env.DATABASE_URL && !process.env.DB_PASSWORD && process.env.NODE_ENV === 'production') {
+  throw new Error('FATAL: DB_PASSWORD must be set in production');
+}
+
 let poolConfig;
 
 if (process.env.DATABASE_URL) {
-  // Parse connection string properly
   poolConfig = {
     connectionString: process.env.DATABASE_URL,
-    // Disable SSL for localhost, enable for production
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
   };
 } else {
@@ -23,12 +27,11 @@ if (process.env.DATABASE_URL) {
   };
 }
 
-// Add pool settings
 poolConfig = {
   ...poolConfig,
   max: 20,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000 // Increased from 2000
+  connectionTimeoutMillis: 10000
 };
 
 const pool = new Pool(poolConfig);
@@ -41,8 +44,7 @@ pool.on('connect', () => {
   console.log('✅ PostgreSQL connected');
 });
 
-// Test connection on startup
-pool.query('SELECT NOW()', (err, res) => {
+pool.query('SELECT NOW()', (err) => {
   if (err) {
     console.error('❌ PostgreSQL connection test failed:', err.message);
   } else {

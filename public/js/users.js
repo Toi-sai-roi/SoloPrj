@@ -1,5 +1,7 @@
 // ==========================================
 // js/users.js — Fetch, render, search users + STRONG Unread Notification
+// v9.1-fix: Thay renderUsersList() bằng updateUserCard() trong các hot-path
+//           để tránh rerender toàn bộ list mỗi lần bấm nút
 // ==========================================
 
 async function loadUsers() {
@@ -18,6 +20,95 @@ async function loadUsers() {
   } catch (err) {
     console.error('Lỗi tải danh sách users:', err);
   }
+}
+
+// Build action button HTML cho 1 user
+function buildActionBtnHtml(username, relation) {
+  if (relation === 'friend') {
+    return `<button class="cyber-btn" style="padding:4px 8px; font-size:9px; border-color:var(--neon-pink); color:var(--neon-pink); min-width:auto; height:auto; line-height:1; font-family:var(--font-tech);" onclick="event.stopPropagation(); handleFriendRequestAction('${username}', 'cancel')">UNFRIEND</button>`;
+  } else if (relation === 'pending_sent') {
+    return `<span style="font-size:9px; color:var(--text-muted); font-family:var(--font-tech);">[ĐANG CHỜ...]</span>`;
+  } else if (relation === 'pending_received') {
+    return `
+      <div style="display:flex; gap:4px;">
+        <button class="cyber-btn" style="padding:4px 6px; font-size:9px; border-color:var(--neon-green); color:var(--neon-green); min-width:auto; height:auto; line-height:1; font-family:var(--font-tech);" onclick="event.stopPropagation(); handleFriendRequestAction('${username}', 'accept')">ACCEPT</button>
+        <button class="cyber-btn" style="padding:4px 6px; font-size:9px; border-color:var(--neon-pink); color:var(--neon-pink); min-width:auto; height:auto; line-height:1; font-family:var(--font-tech);" onclick="event.stopPropagation(); handleFriendRequestAction('${username}', 'cancel')">DECLINE</button>
+      </div>
+    `;
+  } else {
+    return `<button class="cyber-btn cyan-alt" style="padding:4px 8px; font-size:9px; min-width:auto; height:auto; line-height:1; font-family:var(--font-tech);" onclick="event.stopPropagation(); handleFriendRequestAction('${username}', 'add')">ADD FRIEND</button>`;
+  }
+}
+
+// FIX: Update đúng 1 card trong DOM, không rerender cả list
+function updateUserCard(username) {
+  const user = AppState.usersData.find(u => u.username === username);
+  if (!user) return;
+
+  const container = document.getElementById('users-list-container');
+  if (!container) return;
+
+  // Tìm card theo data attribute
+  const card = container.querySelector(`.user-card[data-username="${username}"]`);
+  if (!card) return;
+
+  const hasUnread = AppState.unreadCounts && AppState.unreadCounts[username] > 0;
+  const relation = user.relation || 'none';
+
+  // Update class card (unread glow)
+  card.className = hasUnread ? 'user-card glass-panel has-unread' : 'user-card glass-panel';
+
+  // Update action button
+  const actionArea = card.querySelector('.cyber-network-action-area');
+  if (actionArea) actionArea.innerHTML = buildActionBtnHtml(username, relation);
+
+  // Update status dot
+  const dot = card.querySelector(`#status-dot-${username}`);
+  if (dot) {
+    dot.className = hasUnread ? 'status-dot unread' : `status-dot ${user.online ? 'online' : 'offline'}`;
+    dot.style = '';
+  }
+
+  // Nếu đang ở tab friends và relation không còn là friend → ẩn card
+  if (AppState.currentUsersTab === 'friends' && relation !== 'friend') {
+    card.style.display = 'none';
+    // Update count
+    const countEl = document.getElementById('users-count');
+    if (countEl) {
+      const visible = container.querySelectorAll('.user-card[data-username]:not([style*="display: none"])').length;
+      countEl.textContent = `${visible} FRIENDS`;
+    }
+  }
+}
+
+// Update chỉ status dot của 1 user (dùng cho status_change)
+function updateUserOnlineStatus(username, online) {
+  const userIdx = AppState.usersData.findIndex(u => u.username === username);
+  if (userIdx !== -1) {
+    AppState.usersData[userIdx].online = online;
+  }
+
+  const dot = document.getElementById(`status-dot-${username}`);
+  if (!dot) return;
+
+  const hasUnread = AppState.unreadCounts && AppState.unreadCounts[username] > 0;
+  if (!hasUnread) {
+    dot.className = `status-dot ${online ? 'online' : 'offline'}`;
+  }
+}
+
+// Update unread dot cho tất cả user có thay đổi unread (không rerender cả list)
+function updateUnreadDots(newCounts) {
+  const oldCounts = AppState.unreadCounts || {};
+  AppState.unreadCounts = newCounts;
+
+  // Chỉ update những user có sự thay đổi
+  const allUsernames = new Set([...Object.keys(oldCounts), ...Object.keys(newCounts)]);
+  allUsernames.forEach(username => {
+    if ((oldCounts[username] || 0) !== (newCounts[username] || 0)) {
+      updateUserCard(username);
+    }
+  });
 }
 
 function renderUsersList(filteredUsers = null) {
@@ -55,36 +146,19 @@ function renderUsersList(filteredUsers = null) {
   displayUsers.forEach(user => {
     const card = document.createElement('div');
 
-    // 🔥 UNREAD: Check if this user has unread messages
     const hasUnread = AppState.unreadCounts && AppState.unreadCounts[user.username] > 0;
 
-    // Card class: add 'has-unread' for strong glow effect
     card.className = hasUnread ? 'user-card glass-panel has-unread' : 'user-card glass-panel';
+    // FIX: Thêm data-username để updateUserCard() tìm được
+    card.dataset.username = user.username;
     card.onclick = () => openChatWith(user.username);
 
     const avatarContent = user.avatar
       ? `<img src="${user.avatar}" class="user-avatar-img" style="width:100%; height:100%; border-radius:inherit; object-fit:cover; display:block;">`
       : user.username.charAt(0).toUpperCase();
 
-    let actionBtnHtml = '';
     const relation = user.relation || 'none';
-
-    if (relation === 'friend') {
-      actionBtnHtml = `<button class="cyber-btn" style="padding:4px 8px; font-size:9px; border-color:var(--neon-pink); color:var(--neon-pink); min-width:auto; height:auto; line-height:1; font-family:var(--font-tech);" onclick="event.stopPropagation(); handleFriendRequestAction('${user.username}', 'cancel')">UNFRIEND</button>`;
-    } else if (relation === 'pending_sent') {
-      actionBtnHtml = `<span style="font-size:9px; color:var(--text-muted); font-family:var(--font-tech);">[ĐANG CHỜ...]</span>`;
-    } else if (relation === 'pending_received') {
-      actionBtnHtml = `
-        <div style="display:flex; gap:4px;">
-          <button class="cyber-btn" style="padding:4px 6px; font-size:9px; border-color:var(--neon-green); color:var(--neon-green); min-width:auto; height:auto; line-height:1; font-family:var(--font-tech);" onclick="event.stopPropagation(); handleFriendRequestAction('${user.username}', 'accept')">ACCEPT</button>
-          <button class="cyber-btn" style="padding:4px 6px; font-size:9px; border-color:var(--neon-pink); color:var(--neon-pink); min-width:auto; height:auto; line-height:1; font-family:var(--font-tech);" onclick="event.stopPropagation(); handleFriendRequestAction('${user.username}', 'cancel')">DECLINE</button>
-        </div>
-      `;
-    } else {
-      actionBtnHtml = `<button class="cyber-btn cyan-alt" style="padding:4px 8px; font-size:9px; min-width:auto; height:auto; line-height:1; font-family:var(--font-tech);" onclick="event.stopPropagation(); handleFriendRequestAction('${user.username}', 'add')">ADD FRIEND</button>`;
-    }
-
-    // Dot: if unread → big red pulsing, else normal online/offline
+    const actionBtnHtml = buildActionBtnHtml(user.username, relation);
     const dotClass = hasUnread ? 'status-dot unread' : `status-dot ${user.online ? 'online' : 'offline'}`;
 
     card.style.display = 'flex';
@@ -146,11 +220,13 @@ async function handleFriendRequestAction(targetUser, actionType) {
   if (userIdx !== -1) {
     backupRelation = AppState.usersData[userIdx].relation || 'none';
 
+    // Optimistic update — chỉ update card đó, không rerender cả list
     if (actionType === 'add') AppState.usersData[userIdx].relation = 'pending_sent';
     else if (actionType === 'accept') AppState.usersData[userIdx].relation = 'friend';
     else if (actionType === 'cancel') AppState.usersData[userIdx].relation = 'none';
 
-    renderUsersList();
+    // FIX: updateUserCard thay vì renderUsersList
+    updateUserCard(targetUser);
   }
 
   try {
@@ -160,10 +236,7 @@ async function handleFriendRequestAction(targetUser, actionType) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${AppState.token}`
       },
-      body: JSON.stringify({
-        targetUser: targetUser,
-        action: actionType
-      })
+      body: JSON.stringify({ targetUser, action: actionType })
     });
 
     if (!response.ok) {
@@ -175,7 +248,8 @@ async function handleFriendRequestAction(targetUser, actionType) {
 
     if (userIdx !== -1 && result.data && result.data.relation) {
       AppState.usersData[userIdx].relation = result.data.relation;
-      renderUsersList();
+      // FIX: updateUserCard thay vì renderUsersList
+      updateUserCard(targetUser);
     }
 
   } catch (err) {
@@ -183,7 +257,7 @@ async function handleFriendRequestAction(targetUser, actionType) {
 
     if (userIdx !== -1) {
       AppState.usersData[userIdx].relation = backupRelation;
-      renderUsersList();
+      updateUserCard(targetUser);
       alert('Thao tác thất bại. Vui lòng kiểm tra lại kết nối!');
     }
   }
@@ -196,7 +270,6 @@ function filterUsers() {
   renderUsersList(filtered);
 }
 
-// Search filter
 document.getElementById('search-input').addEventListener('input', function () {
   const term = this.value.trim().toLowerCase();
   if (!term) { renderUsersList(); return; }

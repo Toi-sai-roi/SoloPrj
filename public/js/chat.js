@@ -74,9 +74,13 @@ function initWebSocket() {
   if (AppState.ws) AppState.ws.close();
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  AppState.ws = new WebSocket(`${protocol}//${window.location.host}?token=${AppState.token}`);
+  AppState.ws = new WebSocket(`${protocol}//${window.location.host}`);
 
-  AppState.ws.onopen = () => console.log('[WS Connected]');
+  AppState.ws.onopen = () => {
+    // FIX #2: Gửi auth message đầu tiên thay vì token qua URL
+    AppState.ws.send(JSON.stringify({ type: 'auth', token: AppState.token }));
+    console.log('[WS Connected]');
+  };
 
   AppState.ws.onmessage = (event) => {
     try {
@@ -85,13 +89,6 @@ function initWebSocket() {
       switch (data.type) {
 
         case 'status_change': {
-          const idx = AppState.usersData.findIndex(u => u.username === data.username);
-          if (idx !== -1) {
-            AppState.usersData[idx].online = data.online;
-            renderUsersList();
-          } else {
-            loadUsers();
-          }
           if (AppState.activeChatPartner === data.username) {
             updateChatPartnerStatus(data.online);
           }
@@ -106,7 +103,7 @@ function initWebSocket() {
             if (actionType === 'add') AppState.usersData[idx].relation = 'pending_received';
             else if (actionType === 'accept') AppState.usersData[idx].relation = 'friend';
             else if (actionType === 'cancel') AppState.usersData[idx].relation = 'none';
-            if (typeof renderUsersList === 'function') renderUsersList();
+            if (typeof updateUserCard === 'function') updateUserCard(targetUser);
             if (actionType === 'add' && typeof glowNotification === 'function') glowNotification(targetUser);
           }
           break;
@@ -165,8 +162,7 @@ function initWebSocket() {
         }
 
         case 'unread_counts': {
-          AppState.unreadCounts = data.counts || {};
-          if (typeof renderUsersList === 'function') renderUsersList();
+          updateUnreadDots(data.counts || {});
           break;
         }
 

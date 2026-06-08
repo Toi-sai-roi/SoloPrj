@@ -1,9 +1,9 @@
 // init-db.js
+// v9.1-fix: #10 Thêm reply_to và deleted_at vào CREATE TABLE messages
 const { query } = require('./config/db');
 
 async function init() {
   try {
-    // Users table
     await query(`
       CREATE TABLE IF NOT EXISTS users (
         username VARCHAR(30) PRIMARY KEY,
@@ -16,7 +16,7 @@ async function init() {
       )
     `);
 
-    // Messages table
+    // FIX #10: Thêm reply_to và deleted_at vào schema
     await query(`
       CREATE TABLE IF NOT EXISTS messages (
         id SERIAL PRIMARY KEY,
@@ -26,11 +26,12 @@ async function init() {
         media_url TEXT,
         delivered BOOLEAN DEFAULT FALSE,
         read_at TIMESTAMPTZ,
+        reply_to INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+        deleted_at TIMESTAMPTZ,
         timestamp TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Friends table
     await query(`
       CREATE TABLE IF NOT EXISTS friends (
         user1 VARCHAR(30) REFERENCES users(username) ON DELETE CASCADE,
@@ -42,7 +43,6 @@ async function init() {
       )
     `);
 
-    // Blocks table
     await query(`
       CREATE TABLE IF NOT EXISTS blocks (
         blocker VARCHAR(30) REFERENCES users(username) ON DELETE CASCADE,
@@ -52,7 +52,6 @@ async function init() {
       )
     `);
 
-    // Groups table
     await query(`
       CREATE TABLE IF NOT EXISTS groups (
         id SERIAL PRIMARY KEY,
@@ -64,7 +63,6 @@ async function init() {
       )
     `);
 
-    // Group members
     await query(`
       CREATE TABLE IF NOT EXISTS group_members (
         group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE,
@@ -75,7 +73,6 @@ async function init() {
       )
     `);
 
-    // Group messages
     await query(`
       CREATE TABLE IF NOT EXISTS group_messages (
         id SERIAL PRIMARY KEY,
@@ -87,7 +84,6 @@ async function init() {
       )
     `);
 
-    // Reactions
     await query(`
       CREATE TABLE IF NOT EXISTS reactions (
         message_id INTEGER REFERENCES messages(id) ON DELETE CASCADE,
@@ -98,7 +94,6 @@ async function init() {
       )
     `);
 
-    // Group reactions
     await query(`
       CREATE TABLE IF NOT EXISTS group_reactions (
         message_id INTEGER REFERENCES group_messages(id) ON DELETE CASCADE,
@@ -109,7 +104,6 @@ async function init() {
       )
     `);
 
-    // Media uploads
     await query(`
       CREATE TABLE IF NOT EXISTS media_uploads (
         id SERIAL PRIMARY KEY,
@@ -122,15 +116,14 @@ async function init() {
         uploaded_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       )
     `);
-    
-    // Online users 
+
     await query(`
       CREATE TABLE IF NOT EXISTS online_users (
         username VARCHAR(30) PRIMARY KEY REFERENCES users(username) ON DELETE CASCADE,
         connected_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       )
     `);
-    
+
     console.log('✅ Database initialized');
     process.exit(0);
   } catch (err) {

@@ -1,6 +1,7 @@
 // ==========================================
 // server.js — Express + PostgreSQL + WebSocket Production Server
-// v2.1-fix — Fixed: reply_info in broadcast, removed auto get_history trigger
+// v9.1-fix — Fixed: double CORS, JWT via WS auth message, integer validation,
+//            search_messages auth, errorHandler position, circular require
 // ==========================================
 require('dotenv').config();
 
@@ -17,6 +18,8 @@ const rateLimit = require('express-rate-limit');
 const { query, pool } = require('./config/db');
 const { JWT_SECRET } = require('./middleware/auth');
 const errorHandler = require('./middleware/errorHandler');
+// FIX #12: Import từ lib/broadcast thay vì circular require
+const broadcast = require('./lib/broadcast');
 
 const app = express();
 const server = http.createServer(app);
@@ -24,6 +27,7 @@ const server = http.createServer(app);
 // ==========================================
 // MIDDLEWARE
 // ==========================================
+// FIX #1: Xóa app.use(cors()) thừa ở dưới, chỉ giữ cái có config origin
 app.use(cors({
   origin: true,
   credentials: true
@@ -43,7 +47,7 @@ app.use(helmet({
   }
 }));
 
-app.use(cors());
+// REMOVED: app.use(cors()); // FIX #1: đã xóa duplicate cors
 app.set('trust proxy', 1);
 app.use(compression());
 app.use(express.json({ limit: '10mb' }));
@@ -72,7 +76,6 @@ const blocksRouter = require('./routes/blocks');
 const groupsRouter = require('./routes/groups');
 const uploadRouter = require('./routes/upload');
 
-// New API paths (v2.0+)
 app.use('/api/auth', authRouter);
 app.use('/api/users', usersRouter);
 app.use('/api/profile', profileRouter);
@@ -81,7 +84,7 @@ app.use('/api', blocksRouter);
 app.use('/api/groups', groupsRouter);
 app.use('/api/upload', uploadRouter);
 
-// Legacy API aliases (v1.0 frontend compatibility)
+// Legacy API aliases
 app.post('/api/login', (req, res, next) => {
   req.url = '/login';
   authRouter(req, res, next);
@@ -101,7 +104,7 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Error handling
+// FIX #5: errorHandler phải đặt SAU SPA fallback
 app.use(errorHandler);
 
 // ==========================================
@@ -111,15 +114,20 @@ const wss = new ws.Server({ server });
 
 const onlineUsers = new Map();
 
+// FIX #12: Init broadcast module với onlineUsers map
+broadcast.init(onlineUsers);
+
+// Re-export để routes cũ vẫn hoạt động (compatibility)
+const broadcastToUser = broadcast.broadcastToUser;
+const broadcastStatusChange = broadcast.broadcastStatusChange;
+const broadcastStatusChangeToPair = broadcast.broadcastStatusChangeToPair;
+const broadcastSystemMessage = broadcast.broadcastSystemMessage;
+
 async function trackOnlineUser(username, isOnline) {
   try {
     if (isOnline) {
       const userCheck = await query('SELECT 1 FROM users WHERE username = $1', [username]);
-      if (userCheck.rows.length === 0) {
-        console.log(`[WS] User ${username} not found in DB, skipping online tracking`);
-        return;
-      }
-
+      if (userCheck.rows.length === 0) return;
       await query(`
         INSERT INTO online_users (username, connected_at)
         VALUES ($1, CURRENT_TIMESTAMP)
@@ -148,7 +156,6 @@ async function initOnlineUsersTable() {
   }
 }
 
-// Auto-migrate messages table
 async function migrateMessagesTable() {
   try {
     const readAtCheck = await query(`
@@ -177,7 +184,7 @@ async function migrateMessagesTable() {
       await query(`ALTER TABLE messages ADD COLUMN deleted_at TIMESTAMPTZ`);
       console.log('[DB] Added deleted_at to messages');
     }
-    // 🔥 Pin & Search migration
+
     const pinnedCheck = await query(`
       SELECT table_name FROM information_schema.tables 
       WHERE table_name = 'pinned_messages'
@@ -194,61 +201,11 @@ async function migrateMessagesTable() {
           UNIQUE(user1, user2)
         )
       `);
-      await query(`
-        CREATE INDEX idx_pinned_messages_lookup ON pinned_messages(user1, user2)
-      `);
+      await query(`CREATE INDEX idx_pinned_messages_lookup ON pinned_messages(user1, user2)`);
       console.log('[DB] Created pinned_messages table');
     }
   } catch (err) {
     console.error('[DB] Migration error:', err);
-  }
-}
-
-function broadcastToUser(targetUsername, payload) {
-  if (onlineUsers.has(targetUsername)) {
-    const stringData = JSON.stringify(payload);
-    onlineUsers.get(targetUsername).forEach(client => {
-      if (client.readyState === ws.OPEN) {
-        client.send(stringData);
-      }
-    });
-  }
-}
-
-function broadcastStatusChange(username, online) {
-  const payload = JSON.stringify({ type: 'status_change', username, online });
-  for (const [targetUser, connections] of onlineUsers.entries()) {
-    connections.forEach(c => {
-      if (c.readyState === ws.OPEN) c.send(payload);
-    });
-  }
-}
-
-function broadcastStatusChangeToPair(userA, userB) {
-  const isAOnline = onlineUsers.has(userA);
-  const isBOnline = onlineUsers.has(userB);
-
-  if (isAOnline) {
-    const msgToA = JSON.stringify({ type: 'status_change', username: userB, online: isBOnline });
-    onlineUsers.get(userA).forEach(c => {
-      if (c.readyState === ws.OPEN) c.send(msgToA);
-    });
-  }
-
-  if (isBOnline) {
-    const msgToB = JSON.stringify({ type: 'status_change', username: userA, online: isAOnline });
-    onlineUsers.get(userB).forEach(c => {
-      if (c.readyState === ws.OPEN) c.send(msgToB);
-    });
-  }
-}
-
-function broadcastSystemMessage(text) {
-  const payload = JSON.stringify({ type: 'system', text, timestamp: new Date().toISOString() });
-  for (const connections of onlineUsers.values()) {
-    connections.forEach(c => {
-      if (c.readyState === ws.OPEN) c.send(payload);
-    });
   }
 }
 
@@ -281,7 +238,6 @@ async function getUnreadCounts(username) {
       GROUP BY sender
       ORDER BY count DESC
     `, [username]);
-
     const counts = {};
     result.rows.forEach(row => {
       counts[row.sender] = parseInt(row.count);
@@ -295,13 +251,9 @@ async function getUnreadCounts(username) {
 
 async function broadcastUnreadCounts(username) {
   const counts = await getUnreadCounts(username);
-  broadcastToUser(username, {
-    type: 'unread_counts',
-    counts: counts
-  });
+  broadcastToUser(username, { type: 'unread_counts', counts });
 }
 
-// 🔥 Helper: Get reply info for a message
 async function getReplyInfo(replyToId) {
   if (!replyToId) return null;
   try {
@@ -322,541 +274,533 @@ async function getReplyInfo(replyToId) {
   }
 }
 
-// WebSocket connection handler
+// FIX #3: Helper validate messageId là integer
+function validateMessageId(messageId) {
+  const id = parseInt(messageId);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+// ==========================================
+// WEBSOCKET CONNECTION HANDLER
+// ==========================================
 wss.on('connection', async (wsConn, req) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  const token = url.searchParams.get('token');
+  let username = null;
 
-  if (!token) {
-    wsConn.close(1008, 'Authentication required');
-    return;
-  }
-
-  let username;
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    username = decoded.username;
-
-    const userCheck = await query('SELECT 1 FROM users WHERE username = $1', [username]);
-    if (userCheck.rows.length === 0) {
-      console.log(`[WS] Rejecting connection: User ${username} not found in DB`);
-      wsConn.close(1008, 'User not found');
-      return;
+  // FIX #2: Không nhận token từ URL query string nữa
+  // Yêu cầu client gửi { type: 'auth', token } làm message đầu tiên
+  // Đóng kết nối nếu không nhận được auth trong 5 giây
+  const authTimeout = setTimeout(() => {
+    if (!username) {
+      console.log('[WS] Auth timeout — closing unauthenticated connection');
+      wsConn.close(1008, 'Authentication timeout');
     }
-  } catch {
-    wsConn.close(1008, 'Invalid token');
-    return;
-  }
+  }, 5000); // FIX #2: 5s timeout
 
-  console.log(`[WS] ${username} connected`);
-  await updateLastSeen(username);
-
-  if (!onlineUsers.has(username)) {
-    onlineUsers.set(username, new Set());
-  }
-  onlineUsers.get(username).add(wsConn);
-  await trackOnlineUser(username, true);
-
-  if (onlineUsers.get(username).size === 1) {
-    broadcastStatusChange(username, true);
-    broadcastSystemMessage(`${username} đã đăng nhập vào mạng lưới.`);
-  }
-
-  setTimeout(async () => {
-    await broadcastUnreadCounts(username);
-  }, 500);
-
-  let isAlive = true;
-  wsConn.on('pong', () => {
-    isAlive = true;
-    updateLastSeen(username);
-  });
-
-  const pingInterval = setInterval(() => {
-    if (!isAlive) {
-      wsConn.terminate();
-      return;
-    }
-    isAlive = false;
-    wsConn.ping();
-  }, 30000);
-
-  wsConn.on('message', async (messageStr) => {
+  wsConn.once('message', async (firstMsg) => {
     try {
-      const data = JSON.parse(messageStr);
+      const data = JSON.parse(firstMsg);
+
+      // FIX #2: Message đầu phải là { type: 'auth', token }
+      if (data.type !== 'auth' || !data.token) {
+        clearTimeout(authTimeout);
+        wsConn.close(1008, 'First message must be auth');
+        return;
+      }
+
+      let decoded;
+      try {
+        decoded = jwt.verify(data.token, JWT_SECRET);
+      } catch {
+        clearTimeout(authTimeout);
+        wsConn.close(1008, 'Invalid token');
+        return;
+      }
+
+      username = decoded.username;
+
+      const userCheck = await query('SELECT 1 FROM users WHERE username = $1', [username]);
+      if (userCheck.rows.length === 0) {
+        clearTimeout(authTimeout);
+        console.log(`[WS] Rejecting: User ${username} not found`);
+        wsConn.close(1008, 'User not found');
+        return;
+      }
+
+      clearTimeout(authTimeout);
+      console.log(`[WS] ${username} connected`);
       await updateLastSeen(username);
 
-      if (data.type === 'typing') {
-        const { to, isTyping } = data;
-        if (!to) return;
-        broadcastToUser(to, { type: 'typing', sender: username, isTyping });
-        return;
+      if (!onlineUsers.has(username)) {
+        onlineUsers.set(username, new Set());
+      }
+      onlineUsers.get(username).add(wsConn);
+      await trackOnlineUser(username, true);
+
+      if (onlineUsers.get(username).size === 1) {
+        broadcastStatusChange(username, true);
+        broadcastSystemMessage(`${username} đã đăng nhập vào mạng lưới.`);
       }
 
-      if (data.type === 'get_history') {
-        const { with: withUser } = data;
-        if (!withUser) return;
-
-        await markMessagesRead(withUser, username);
-        broadcastToUser(withUser, { type: 'read_receipt', reader: username, with: withUser });
+      setTimeout(async () => {
         await broadcastUnreadCounts(username);
+      }, 500);
 
-        const history = await query(`
-          SELECT 
-            m.id,
-            m.sender,
-            m.receiver,
-            m.text,
-            m.media_url,
-            m.timestamp,
-            m.delivered,
-            m.read_at,
-            m.reply_to,
-            m.deleted_at,
-            CASE WHEN m.deleted_at IS NOT NULL THEN '[TIN NHẮN ĐÃ BỊ XÓA]' ELSE m.text END as display_text,
-            COALESCE(
-              (SELECT json_object_agg(r.emoji, r.count) 
-               FROM (SELECT emoji, COUNT(*) as count 
-                     FROM reactions 
-                     WHERE message_id = m.id 
-                     GROUP BY emoji) r),
-              '{}'
-            ) as reactions,
-            (SELECT json_build_object(
-              'id', rm.id,
-              'sender', rm.sender,
-              'text', CASE WHEN rm.deleted_at IS NOT NULL THEN '[Đã xóa]' ELSE LEFT(rm.text, 100) END
-            ) FROM messages rm WHERE rm.id = m.reply_to) as reply_info
-          FROM messages m
-          WHERE ((m.sender = $1 AND m.receiver = $2) 
-             OR (m.sender = $2 AND m.receiver = $1))
-          ORDER BY m.timestamp ASC
-        `, [username, withUser]);
+      let isAlive = true;
+      wsConn.on('pong', () => {
+        isAlive = true;
+        updateLastSeen(username);
+      });
 
-        wsConn.send(JSON.stringify({ type: 'history', with: withUser, messages: history.rows }));
-        return;
-      }
-
-      if (data.type === 'send_message') {
-        const { to, text, media_url, reply_to } = data;
-        if (!to || (!text?.trim() && !media_url)) return;
-
-        const cleanText = text?.trim() || '';
-
-        const blockCheck = await query(`
-          SELECT 1 FROM blocks 
-          WHERE (blocker = $1 AND blocked = $2) 
-             OR (blocker = $2 AND blocked = $1)
-        `, [username, to]);
-
-        if (blockCheck.rows.length > 0) {
-          wsConn.send(JSON.stringify({
-            type: 'system',
-            text: `[ SYSTEM // ACCESS_DENIED: Communication blocked ]`
-          }));
+      const pingInterval = setInterval(() => {
+        if (!isAlive) {
+          wsConn.terminate();
           return;
         }
+        isAlive = false;
+        wsConn.ping();
+      }, 30000);
 
-        const isReceiverOnline = onlineUsers.has(to);
+      wsConn.on('message', async (messageStr) => {
+        try {
+          const data = JSON.parse(messageStr);
+          await updateLastSeen(username);
 
-        const result = await query(`
-          INSERT INTO messages (sender, receiver, text, media_url, delivered, reply_to)
-          VALUES ($1, $2, $3, $4, $5, $6)
-          RETURNING id, timestamp
-        `, [username, to, cleanText, media_url || '', isReceiverOnline, reply_to || null]);
-
-        const msgId = result.rows[0].id;
-        const timestamp = result.rows[0].timestamp;
-
-        // 🔥 Get reply info if this is a reply
-        const replyInfo = await getReplyInfo(reply_to);
-
-        const chatMsg = {
-          type: 'message',
-          id: msgId,
-          sender: username,
-          receiver: to,
-          text: cleanText,
-          media_url: media_url || '',
-          timestamp,
-          delivered: isReceiverOnline,
-          read_at: null,
-          reply_to: reply_to || null,
-          reply_info: replyInfo  // 🔥 Include reply info in broadcast
-        };
-
-        if (isReceiverOnline) {
-          broadcastToUser(to, chatMsg);
-          await broadcastUnreadCounts(to);
-        }
-
-        wsConn.send(JSON.stringify({ ...chatMsg, self: true }));
-        return;
-      }
-
-      if (data.type === 'delete_message') {
-        const { messageId } = data;
-        if (!messageId) return;
-
-        const msgCheck = await query(`
-          SELECT sender, receiver FROM messages WHERE id = $1
-        `, [messageId]);
-
-        if (msgCheck.rows.length === 0) {
-          wsConn.send(JSON.stringify({ type: 'system', text: 'Message not found' }));
-          return;
-        }
-
-        const { sender, receiver } = msgCheck.rows[0];
-        if (sender !== username) {
-          wsConn.send(JSON.stringify({ type: 'system', text: 'Cannot delete other user message' }));
-          return;
-        }
-
-        await query(`
-          UPDATE messages SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1
-        `, [messageId]);
-
-        const update = {
-          type: 'message_deleted',
-          messageId: messageId
-        };
-        broadcastToUser(sender, update);
-        broadcastToUser(receiver, update);
-        return;
-      }
-
-      if (data.type === 'add_reaction') {
-        const { messageId, emoji } = data;
-        if (!messageId || !emoji) return;
-
-        await query(`
-          INSERT INTO reactions (message_id, username, emoji)
-          VALUES ($1, $2, $3)
-          ON CONFLICT (message_id, username) 
-          DO UPDATE SET emoji = $3, created_at = CURRENT_TIMESTAMP
-        `, [messageId, username, emoji]);
-
-        const reactions = await query(`
-          SELECT json_object_agg(username, emoji) as reaction_map
-          FROM reactions
-          WHERE message_id = $1
-        `, [messageId]);
-
-        const msgInfo = await query(`
-          SELECT sender, receiver FROM messages WHERE id = $1
-        `, [messageId]);
-
-        if (msgInfo.rows.length > 0) {
-          const { sender, receiver } = msgInfo.rows[0];
-          const update = {
-            type: 'reaction_update',
-            messageId,
-            reactions: reactions.rows[0]?.reaction_map || {}
-          };
-          broadcastToUser(sender, update);
-          broadcastToUser(receiver, update);
-        }
-        return;
-      }
-
-      if (data.type === 'send_group_message') {
-        const { groupId, text, media_url } = data;
-        if (!groupId || (!text?.trim() && !media_url)) return;
-
-        const memberCheck = await query(`
-          SELECT 1 FROM group_members WHERE group_id = $1 AND username = $2
-        `, [groupId, username]);
-
-        if (memberCheck.rows.length === 0) {
-          wsConn.send(JSON.stringify({
-            type: 'system',
-            text: '[ SYSTEM // ACCESS_DENIED: Not a group member ]'
-          }));
-          return;
-        }
-
-        const cleanText = text?.trim() || '';
-
-        const result = await query(`
-          INSERT INTO group_messages (group_id, sender, text, media_url)
-          VALUES ($1, $2, $3, $4)
-          RETURNING id, timestamp
-        `, [groupId, username, cleanText, media_url || '']);
-
-        const msg = {
-          type: 'group_message',
-          id: result.rows[0].id,
-          groupId,
-          sender: username,
-          text: cleanText,
-          media_url: media_url || '',
-          timestamp: result.rows[0].timestamp
-        };
-
-        const members = await query(`
-          SELECT username FROM group_members WHERE group_id = $1
-        `, [groupId]);
-
-        members.rows.forEach(m => {
-          if (m.username === username) {
-            wsConn.send(JSON.stringify({ ...msg, self: true }));
-          } else {
-            broadcastToUser(m.username, msg);
+          if (data.type === 'typing') {
+            const { to, isTyping } = data;
+            if (!to) return;
+            broadcastToUser(to, { type: 'typing', sender: username, isTyping });
+            return;
           }
-        });
-        return;
-      }
 
-      if (data.type === 'get_group_history') {
-        const { groupId } = data;
-        if (!groupId) return;
+          if (data.type === 'get_history') {
+            const { with: withUser } = data;
+            if (!withUser) return;
 
-        const memberCheck = await query(`
-          SELECT 1 FROM group_members WHERE group_id = $1 AND username = $2
-        `, [groupId, username]);
+            await markMessagesRead(withUser, username);
+            broadcastToUser(withUser, { type: 'read_receipt', reader: username, with: withUser });
+            await broadcastUnreadCounts(username);
 
-        if (memberCheck.rows.length === 0) return;
+            const history = await query(`
+              SELECT 
+                m.id, m.sender, m.receiver, m.text, m.media_url,
+                m.timestamp, m.delivered, m.read_at, m.reply_to, m.deleted_at,
+                CASE WHEN m.deleted_at IS NOT NULL THEN '[TIN NHẮN ĐÃ BỊ XÓA]' ELSE m.text END as display_text,
+                COALESCE(
+                  (SELECT json_object_agg(r.emoji, r.count) 
+                   FROM (SELECT emoji, COUNT(*) as count 
+                         FROM reactions 
+                         WHERE message_id = m.id 
+                         GROUP BY emoji) r),
+                  '{}'
+                ) as reactions,
+                (SELECT json_build_object(
+                  'id', rm.id,
+                  'sender', rm.sender,
+                  'text', CASE WHEN rm.deleted_at IS NOT NULL THEN '[Đã xóa]' ELSE LEFT(rm.text, 100) END
+                ) FROM messages rm WHERE rm.id = m.reply_to) as reply_info
+              FROM messages m
+              WHERE ((m.sender = $1 AND m.receiver = $2) 
+                 OR (m.sender = $2 AND m.receiver = $1))
+              ORDER BY m.timestamp ASC
+            `, [username, withUser]);
 
-        const messages = await query(`
-          SELECT 
-            gm.id,
-            gm.group_id,
-            gm.sender,
-            gm.text,
-            gm.media_url,
-            gm.timestamp,
-            COALESCE(
-              (SELECT json_object_agg(username, emoji)
-               FROM group_reactions
-               WHERE message_id = gm.id),
-              '{}'
-            ) as reactions
-          FROM group_messages gm
-          WHERE gm.group_id = $1
-          ORDER BY gm.timestamp ASC
-        `, [groupId]);
+            wsConn.send(JSON.stringify({ type: 'history', with: withUser, messages: history.rows }));
+            return;
+          }
 
-        wsConn.send(JSON.stringify({ type: 'group_history', groupId, messages: messages.rows }));
-        return;
-      }
+          if (data.type === 'send_message') {
+            const { to, text, media_url, reply_to } = data;
+            if (!to || (!text?.trim() && !media_url)) return;
 
-      if (data.type === 'group_typing') {
-        const { groupId, isTyping } = data;
-        if (!groupId) return;
+            const cleanText = text?.trim() || '';
 
-        const members = await query(`
-          SELECT username FROM group_members WHERE group_id = $1 AND username != $2
-        `, [groupId, username]);
+            const blockCheck = await query(`
+              SELECT 1 FROM blocks 
+              WHERE (blocker = $1 AND blocked = $2) OR (blocker = $2 AND blocked = $1)
+            `, [username, to]);
 
-        members.rows.forEach(m => {
-          broadcastToUser(m.username, {
-            type: 'group_typing',
-            groupId,
-            sender: username,
-            isTyping
-          });
-        });
-        return;
-      }
+            if (blockCheck.rows.length > 0) {
+              wsConn.send(JSON.stringify({ type: 'system', text: `[ SYSTEM // ACCESS_DENIED: Communication blocked ]` }));
+              return;
+            }
 
-      if (data.type === 'group_reaction') {
-        const { messageId, emoji } = data;
-        if (!messageId || !emoji) return;
+            const isReceiverOnline = onlineUsers.has(to);
 
-        const msg = await query(`
-          SELECT group_id FROM group_messages WHERE id = $1
-        `, [messageId]);
+            const result = await query(`
+              INSERT INTO messages (sender, receiver, text, media_url, delivered, reply_to)
+              VALUES ($1, $2, $3, $4, $5, $6)
+              RETURNING id, timestamp
+            `, [username, to, cleanText, media_url || '', isReceiverOnline, reply_to || null]);
 
-        if (msg.rows.length === 0) return;
+            const msgId = result.rows[0].id;
+            const timestamp = result.rows[0].timestamp;
 
-        const groupId = msg.rows[0].group_id;
+            const replyInfo = await getReplyInfo(reply_to);
 
-        await query(`
-          INSERT INTO group_reactions (message_id, username, emoji)
-          VALUES ($1, $2, $3)
-          ON CONFLICT (message_id, username)
-          DO UPDATE SET emoji = $3, created_at = CURRENT_TIMESTAMP
-        `, [messageId, username, emoji]);
+            const chatMsg = {
+              type: 'message',
+              id: msgId,
+              sender: username,
+              receiver: to,
+              text: cleanText,
+              media_url: media_url || '',
+              timestamp,
+              delivered: isReceiverOnline,
+              read_at: null,
+              reply_to: reply_to || null,
+              reply_info: replyInfo
+            };
 
-        const reactions = await query(`
-          SELECT json_object_agg(username, emoji) as reaction_map
-          FROM group_reactions
-          WHERE message_id = $1
-        `, [messageId]);
+            if (isReceiverOnline) {
+              broadcastToUser(to, chatMsg);
+              await broadcastUnreadCounts(to);
+            }
 
-        const members = await query(`
-          SELECT username FROM group_members WHERE group_id = $1
-        `, [groupId]);
+            wsConn.send(JSON.stringify({ ...chatMsg, self: true }));
+            return;
+          }
 
-        members.rows.forEach(m => {
-          broadcastToUser(m.username, {
-            type: 'group_reaction_update',
-            messageId,
-            groupId,
-            reactions: reactions.rows[0]?.reaction_map || {}
-          });
-        });
-        return;
-      }
-      // ========== PIN MESSAGE ==========
-      if (data.type === 'pin_message') {
-        const { messageId } = data;
-        if (!messageId) return;
+          if (data.type === 'delete_message') {
+            const { messageId } = data;
+            // FIX #3: Validate messageId là integer
+            const validId = validateMessageId(messageId);
+            if (!validId) return;
 
-        const msgCheck = await query(`
-          SELECT sender, receiver FROM messages WHERE id = $1 AND deleted_at IS NULL
-        `, [messageId]);
+            const msgCheck = await query(`SELECT sender, receiver FROM messages WHERE id = $1`, [validId]);
+            if (msgCheck.rows.length === 0) {
+              wsConn.send(JSON.stringify({ type: 'system', text: 'Message not found' }));
+              return;
+            }
 
-        if (msgCheck.rows.length === 0) {
-          wsConn.send(JSON.stringify({ type: 'system', text: 'Message not found or deleted' }));
-          return;
+            const { sender, receiver } = msgCheck.rows[0];
+            if (sender !== username) {
+              wsConn.send(JSON.stringify({ type: 'system', text: 'Cannot delete other user message' }));
+              return;
+            }
+
+            await query(`UPDATE messages SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1`, [validId]);
+
+            const update = { type: 'message_deleted', messageId: validId };
+            broadcastToUser(sender, update);
+            broadcastToUser(receiver, update);
+            return;
+          }
+
+          if (data.type === 'add_reaction') {
+            const { messageId, emoji } = data;
+            // FIX #3: Validate messageId là integer
+            const validId = validateMessageId(messageId);
+            if (!validId || !emoji) return;
+
+            await query(`
+              INSERT INTO reactions (message_id, username, emoji)
+              VALUES ($1, $2, $3)
+              ON CONFLICT (message_id, username) 
+              DO UPDATE SET emoji = $3, created_at = CURRENT_TIMESTAMP
+            `, [validId, username, emoji]);
+
+            const reactions = await query(`
+              SELECT json_object_agg(username, emoji) as reaction_map
+              FROM reactions WHERE message_id = $1
+            `, [validId]);
+
+            const msgInfo = await query(`SELECT sender, receiver FROM messages WHERE id = $1`, [validId]);
+
+            if (msgInfo.rows.length > 0) {
+              const { sender, receiver } = msgInfo.rows[0];
+              const update = {
+                type: 'reaction_update',
+                messageId: validId,
+                reactions: reactions.rows[0]?.reaction_map || {}
+              };
+              broadcastToUser(sender, update);
+              broadcastToUser(receiver, update);
+            }
+            return;
+          }
+
+          if (data.type === 'send_group_message') {
+            const { groupId, text, media_url } = data;
+            if (!groupId || (!text?.trim() && !media_url)) return;
+
+            const memberCheck = await query(`
+              SELECT 1 FROM group_members WHERE group_id = $1 AND username = $2
+            `, [groupId, username]);
+
+            if (memberCheck.rows.length === 0) {
+              wsConn.send(JSON.stringify({ type: 'system', text: '[ SYSTEM // ACCESS_DENIED: Not a group member ]' }));
+              return;
+            }
+
+            const cleanText = text?.trim() || '';
+
+            const result = await query(`
+              INSERT INTO group_messages (group_id, sender, text, media_url)
+              VALUES ($1, $2, $3, $4)
+              RETURNING id, timestamp
+            `, [groupId, username, cleanText, media_url || '']);
+
+            const msg = {
+              type: 'group_message',
+              id: result.rows[0].id,
+              groupId,
+              sender: username,
+              text: cleanText,
+              media_url: media_url || '',
+              timestamp: result.rows[0].timestamp
+            };
+
+            const members = await query(`SELECT username FROM group_members WHERE group_id = $1`, [groupId]);
+
+            members.rows.forEach(m => {
+              if (m.username === username) {
+                wsConn.send(JSON.stringify({ ...msg, self: true }));
+              } else {
+                broadcastToUser(m.username, msg);
+              }
+            });
+            return;
+          }
+
+          if (data.type === 'get_group_history') {
+            const { groupId } = data;
+            if (!groupId) return;
+
+            const memberCheck = await query(`
+              SELECT 1 FROM group_members WHERE group_id = $1 AND username = $2
+            `, [groupId, username]);
+            if (memberCheck.rows.length === 0) return;
+
+            const messages = await query(`
+              SELECT 
+                gm.id, gm.group_id, gm.sender, gm.text, gm.media_url, gm.timestamp,
+                COALESCE(
+                  (SELECT json_object_agg(username, emoji)
+                   FROM group_reactions WHERE message_id = gm.id),
+                  '{}'
+                ) as reactions
+              FROM group_messages gm
+              WHERE gm.group_id = $1
+              ORDER BY gm.timestamp ASC
+            `, [groupId]);
+
+            wsConn.send(JSON.stringify({ type: 'group_history', groupId, messages: messages.rows }));
+            return;
+          }
+
+          if (data.type === 'group_typing') {
+            const { groupId, isTyping } = data;
+            if (!groupId) return;
+
+            const members = await query(`
+              SELECT username FROM group_members WHERE group_id = $1 AND username != $2
+            `, [groupId, username]);
+
+            members.rows.forEach(m => {
+              broadcastToUser(m.username, { type: 'group_typing', groupId, sender: username, isTyping });
+            });
+            return;
+          }
+
+          if (data.type === 'group_reaction') {
+            const { messageId, emoji } = data;
+            if (!messageId || !emoji) return;
+
+            const msg = await query(`SELECT group_id FROM group_messages WHERE id = $1`, [messageId]);
+            if (msg.rows.length === 0) return;
+
+            const groupId = msg.rows[0].group_id;
+
+            await query(`
+              INSERT INTO group_reactions (message_id, username, emoji)
+              VALUES ($1, $2, $3)
+              ON CONFLICT (message_id, username) DO UPDATE SET emoji = $3, created_at = CURRENT_TIMESTAMP
+            `, [messageId, username, emoji]);
+
+            const reactions = await query(`
+              SELECT json_object_agg(username, emoji) as reaction_map
+              FROM group_reactions WHERE message_id = $1
+            `, [messageId]);
+
+            const members = await query(`SELECT username FROM group_members WHERE group_id = $1`, [groupId]);
+
+            members.rows.forEach(m => {
+              broadcastToUser(m.username, {
+                type: 'group_reaction_update',
+                messageId, groupId,
+                reactions: reactions.rows[0]?.reaction_map || {}
+              });
+            });
+            return;
+          }
+
+          if (data.type === 'pin_message') {
+            const { messageId } = data;
+            // FIX #3: Validate messageId là integer
+            const validId = validateMessageId(messageId);
+            if (!validId) return;
+
+            const msgCheck = await query(`
+              SELECT sender, receiver FROM messages WHERE id = $1 AND deleted_at IS NULL
+            `, [validId]);
+
+            if (msgCheck.rows.length === 0) {
+              wsConn.send(JSON.stringify({ type: 'system', text: 'Message not found or deleted' }));
+              return;
+            }
+
+            const { sender, receiver } = msgCheck.rows[0];
+            if (sender !== username && receiver !== username) {
+              wsConn.send(JSON.stringify({ type: 'system', text: 'Cannot pin message from other conversation' }));
+              return;
+            }
+
+            const u1 = sender < receiver ? sender : receiver;
+            const u2 = sender < receiver ? receiver : sender;
+
+            await query(`
+              INSERT INTO pinned_messages (user1, user2, message_id, pinned_by)
+              VALUES ($1, $2, $3, $4)
+              ON CONFLICT (user1, user2) 
+              DO UPDATE SET message_id = $3, pinned_by = $4, pinned_at = CURRENT_TIMESTAMP
+            `, [u1, u2, validId, username]);
+
+            const pinnedMsg = await query(`
+              SELECT m.id, m.sender, m.text, m.media_url, m.timestamp, m.reply_to,
+                (SELECT json_build_object(
+                  'id', rm.id, 'sender', rm.sender,
+                  'text', CASE WHEN rm.deleted_at IS NOT NULL THEN '[Đã xóa]' ELSE LEFT(rm.text, 100) END
+                ) FROM messages rm WHERE rm.id = m.reply_to) as reply_info
+              FROM messages m WHERE m.id = $1
+            `, [validId]);
+
+            const pinUpdate = {
+              type: 'pin_update',
+              conversation: { user1: u1, user2: u2 },
+              pinned_message: pinnedMsg.rows[0] || null,
+              pinned_by: username,
+              pinned_at: new Date().toISOString()
+            };
+
+            broadcastToUser(sender, pinUpdate);
+            broadcastToUser(receiver, pinUpdate);
+            return;
+          }
+
+          if (data.type === 'unpin_message') {
+            const { withUser } = data;
+            if (!withUser) return;
+
+            const u1 = username < withUser ? username : withUser;
+            const u2 = username < withUser ? withUser : username;
+
+            await query(`DELETE FROM pinned_messages WHERE user1 = $1 AND user2 = $2`, [u1, u2]);
+
+            const unpinUpdate = {
+              type: 'pin_update',
+              conversation: { user1: u1, user2: u2 },
+              pinned_message: null
+            };
+            broadcastToUser(username, unpinUpdate);
+            broadcastToUser(withUser, unpinUpdate);
+            return;
+          }
+
+          if (data.type === 'get_pinned') {
+            const { with: withUser } = data;
+            if (!withUser) return;
+
+            const u1 = username < withUser ? username : withUser;
+            const u2 = username < withUser ? withUser : username;
+
+            const result = await query(`
+              SELECT m.id, m.sender, m.text, m.media_url, m.timestamp, m.reply_to,
+                (SELECT json_build_object(
+                  'id', rm.id, 'sender', rm.sender,
+                  'text', CASE WHEN rm.deleted_at IS NOT NULL THEN '[Đã xóa]' ELSE LEFT(rm.text, 100) END
+                ) FROM messages rm WHERE rm.id = m.reply_to) as reply_info
+              FROM pinned_messages pm
+              JOIN messages m ON pm.message_id = m.id
+              WHERE pm.user1 = $1 AND pm.user2 = $2
+            `, [u1, u2]);
+
+            wsConn.send(JSON.stringify({
+              type: 'pin_update',
+              conversation: { user1: u1, user2: u2 },
+              pinned_message: result.rows[0] || null
+            }));
+            return;
+          }
+
+          if (data.type === 'search_messages') {
+            const { with: withUser, q: keyword } = data;
+            if (!withUser || !keyword?.trim()) {
+              wsConn.send(JSON.stringify({ type: 'search_results', results: [] }));
+              return;
+            }
+
+            // FIX #4: Verify username là một trong hai bên của conversation với withUser
+            // Query messages table (KHÔNG dùng friends table)
+            const authCheck = await query(`
+              SELECT 1 FROM messages
+              WHERE (sender = $1 AND receiver = $2) OR (sender = $2 AND receiver = $1)
+              LIMIT 1
+            `, [username, withUser]);
+
+            if (authCheck.rows.length === 0) {
+              wsConn.send(JSON.stringify({ type: 'search_results', results: [] }));
+              return;
+            }
+
+            const searchTerm = `%${keyword.trim().toLowerCase()}%`;
+
+            const results = await query(`
+              SELECT m.id, m.sender, m.text, m.media_url, m.timestamp, m.reply_to
+              FROM messages m
+              WHERE ((m.sender = $1 AND m.receiver = $2) OR (m.sender = $2 AND m.receiver = $1))
+                AND m.deleted_at IS NULL
+                AND LOWER(m.text) LIKE $3
+              ORDER BY m.timestamp DESC
+              LIMIT 50
+            `, [username, withUser, searchTerm]);
+
+            wsConn.send(JSON.stringify({
+              type: 'search_results',
+              with: withUser,
+              query: keyword.trim(),
+              results: results.rows
+            }));
+            return;
+          }
+        } catch (err) {
+          console.error('WS message error:', err);
         }
+      });
 
-        const { sender, receiver } = msgCheck.rows[0];
-        // Verify user is part of this conversation
-        if (sender !== username && receiver !== username) {
-          wsConn.send(JSON.stringify({ type: 'system', text: 'Cannot pin message from other conversation' }));
-          return;
+      wsConn.on('close', async () => {
+        clearInterval(pingInterval);
+        const conns = onlineUsers.get(username);
+        if (conns) {
+          conns.delete(wsConn);
+          if (conns.size === 0) {
+            onlineUsers.delete(username);
+            await trackOnlineUser(username, false);
+            broadcastStatusChange(username, false);
+            broadcastSystemMessage(`${username} đã ngắt kết nối.`);
+          }
         }
+      });
 
-        const u1 = sender < receiver ? sender : receiver;
-        const u2 = sender < receiver ? receiver : sender;
-
-        // Upsert: REPLACE old pinned message
-        await query(`
-          INSERT INTO pinned_messages (user1, user2, message_id, pinned_by)
-          VALUES ($1, $2, $3, $4)
-          ON CONFLICT (user1, user2) 
-          DO UPDATE SET message_id = $3, pinned_by = $4, pinned_at = CURRENT_TIMESTAMP
-        `, [u1, u2, messageId, username]);
-
-        // Get pinned message details
-        const pinnedMsg = await query(`
-          SELECT m.id, m.sender, m.text, m.media_url, m.timestamp, m.reply_to,
-            (SELECT json_build_object(
-              'id', rm.id,
-              'sender', rm.sender,
-              'text', CASE WHEN rm.deleted_at IS NOT NULL THEN '[Đã xóa]' ELSE LEFT(rm.text, 100) END
-            ) FROM messages rm WHERE rm.id = m.reply_to) as reply_info
-          FROM messages m WHERE m.id = $1
-        `, [messageId]);
-
-        const pinUpdate = {
-          type: 'pin_update',
-          conversation: { user1: u1, user2: u2 },
-          pinned_message: pinnedMsg.rows[0] || null,
-          pinned_by: username,
-          pinned_at: new Date().toISOString()
-        };
-
-        broadcastToUser(sender, pinUpdate);
-        broadcastToUser(receiver, pinUpdate);
-        return;
-      }
-
-      // ========== UNPIN MESSAGE ==========
-      if (data.type === 'unpin_message') {
-        const { withUser } = data;
-        if (!withUser) return;
-
-        const u1 = username < withUser ? username : withUser;
-        const u2 = username < withUser ? withUser : username;
-
-        await query(`DELETE FROM pinned_messages WHERE user1 = $1 AND user2 = $2`, [u1, u2]);
-
-        const unpinUpdate = {
-          type: 'pin_update',
-          conversation: { user1: u1, user2: u2 },
-          pinned_message: null
-        };
-
-        broadcastToUser(username, unpinUpdate);
-        broadcastToUser(withUser, unpinUpdate);
-        return;
-      }
-
-      // ========== GET PINNED MESSAGE ==========
-      if (data.type === 'get_pinned') {
-        const { with: withUser } = data;
-        if (!withUser) return;
-
-        const u1 = username < withUser ? username : withUser;
-        const u2 = username < withUser ? withUser : username;
-
-        const result = await query(`
-          SELECT m.id, m.sender, m.text, m.media_url, m.timestamp, m.reply_to,
-            (SELECT json_build_object(
-              'id', rm.id,
-              'sender', rm.sender,
-              'text', CASE WHEN rm.deleted_at IS NOT NULL THEN '[Đã xóa]' ELSE LEFT(rm.text, 100) END
-            ) FROM messages rm WHERE rm.id = m.reply_to) as reply_info
-          FROM pinned_messages pm
-          JOIN messages m ON pm.message_id = m.id
-          WHERE pm.user1 = $1 AND pm.user2 = $2
-        `, [u1, u2]);
-
-        wsConn.send(JSON.stringify({
-          type: 'pin_update',
-          conversation: { user1: u1, user2: u2 },
-          pinned_message: result.rows[0] || null
-        }));
-        return;
-      }
-
-      // ========== SEARCH MESSAGES ==========
-      if (data.type === 'search_messages') {
-        const { with: withUser, q: keyword } = data;
-        if (!withUser || !keyword?.trim()) {
-          wsConn.send(JSON.stringify({ type: 'search_results', results: [] }));
-          return;
-        }
-
-        const searchTerm = `%${keyword.trim().toLowerCase()}%`;
-
-        const results = await query(`
-          SELECT 
-            m.id,
-            m.sender,
-            m.text,
-            m.media_url,
-            m.timestamp,
-            m.reply_to
-          FROM messages m
-          WHERE ((m.sender = $1 AND m.receiver = $2) 
-             OR (m.sender = $2 AND m.receiver = $1))
-            AND m.deleted_at IS NULL
-            AND LOWER(m.text) LIKE $3
-          ORDER BY m.timestamp DESC
-          LIMIT 50
-        `, [username, withUser, searchTerm]);
-
-        wsConn.send(JSON.stringify({
-          type: 'search_results',
-          with: withUser,
-          query: keyword.trim(),
-          results: results.rows
-        }));
-        return;
-      }
     } catch (err) {
-      console.error('WS message error:', err);
+      clearTimeout(authTimeout);
+      console.error('[WS] Auth parse error:', err);
+      wsConn.close(1008, 'Invalid auth message');
     }
   });
 
-  wsConn.on('close', async () => {
-    clearInterval(pingInterval);
-
-    const conns = onlineUsers.get(username);
-    if (conns) {
-      conns.delete(wsConn);
-      if (conns.size === 0) {
-        onlineUsers.delete(username);
-        await trackOnlineUser(username, false);
-        broadcastStatusChange(username, false);
-        broadcastSystemMessage(`${username} đã ngắt kết nối.`);
-      }
-    }
+  // Nếu connection bị đóng trước khi auth
+  wsConn.on('close', () => {
+    clearTimeout(authTimeout);
   });
 });
 
@@ -866,9 +810,7 @@ wss.on('connection', async (wsConn, req) => {
 process.on('SIGTERM', async () => {
   console.log('SIGTERM received, shutting down gracefully...');
   wss.clients.forEach(client => client.close(1001, 'Server shutting down'));
-  server.close(() => {
-    console.log('HTTP server closed');
-  });
+  server.close(() => console.log('HTTP server closed'));
   await pool.end();
   console.log('Database pool closed');
   process.exit(0);
@@ -877,9 +819,7 @@ process.on('SIGTERM', async () => {
 process.on('SIGINT', async () => {
   console.log('SIGINT received, shutting down gracefully...');
   wss.clients.forEach(client => client.close(1001, 'Server shutting down'));
-  server.close(() => {
-    console.log('HTTP server closed');
-  });
+  server.close(() => console.log('HTTP server closed'));
   await pool.end();
   console.log('Database pool closed');
   process.exit(0);
@@ -896,7 +836,7 @@ async function start() {
 
   server.listen(PORT, () => {
     console.log(`====================================================`);
-    console.log(`🚀 CYBERPUNK CHAT v2.1-fix — REPLY + DELETE READY`);
+    console.log(`🚀 CYBERPUNK CHAT v9.1-fix — SECURITY + BROADCAST`);
     console.log(`🔧 Express + PostgreSQL + WebSocket`);
     console.log(`🔗 http://localhost:${PORT}`);
     console.log(`====================================================`);
