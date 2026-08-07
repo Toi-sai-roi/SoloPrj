@@ -69,12 +69,12 @@ async function migrate() {
     await client.query(`
       CREATE TABLE IF NOT EXISTS friends (
         id         SERIAL PRIMARY KEY,
-        user_one   VARCHAR(30) NOT NULL REFERENCES users(username) ON DELETE CASCADE,
-        user_two   VARCHAR(30) NOT NULL REFERENCES users(username) ON DELETE CASCADE,
+        user1   VARCHAR(30) NOT NULL REFERENCES users(username) ON DELETE CASCADE,
+        user2   VARCHAR(30) NOT NULL REFERENCES users(username) ON DELETE CASCADE,
         status     VARCHAR(20) DEFAULT 'pending',
         sender     VARCHAR(30) NOT NULL,
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(user_one, user_two)
+        UNIQUE(user1, user2)
       )
     `);
 
