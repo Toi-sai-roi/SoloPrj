@@ -23,6 +23,7 @@
       <div class="auth-tabs">
         <button id="tab-login" class="auth-tab active" onclick="switchAuthTab('login')">LOGIN</button>
         <button id="tab-register" class="auth-tab" onclick="switchAuthTab('register')">REGISTER</button>
+        <button id="tab-forgot" class="auth-tab" onclick="switchAuthTab('forgot')">FORGOT</button>
       </div>
       <form id="auth-form" onsubmit="handleAuthSubmit(event)">
         <div class="auth-form-group">
@@ -41,6 +42,27 @@
           <div id="auth-spinner" class="spinner"></div>
         </div>
       </form>
+      <form id="forgot-form" onsubmit="handleForgotPassword(event)" style="display:none;">
+        <div class="auth-form-group">
+          <label for="forgot-username">USERNAME // NEURAL ID</label>
+          <input type="text" id="forgot-username" class="cyber-input" placeholder="e.g. Neo101" required
+            autocomplete="username">
+        </div>
+        <div class="auth-form-group">
+          <label for="forgot-recovery-code">RECOVERY CODE</label>
+          <input type="text" id="forgot-recovery-code" class="cyber-input" placeholder="XXXX-XXXX-XXXX" required
+            style="text-transform:uppercase;">
+        </div>
+        <div class="auth-form-group">
+          <label for="forgot-new-password">NEW PASSWORD // MATRIX KEY</label>
+          <input type="password" id="forgot-new-password" class="cyber-input" placeholder="••••••••" required
+            autocomplete="new-password">
+        </div>
+        <div id="forgot-error-msg" class="auth-error"></div>
+        <div style="margin-top: 28px;">
+          <button type="submit" class="cyber-btn" style="width:100%;">RESET ACCESS KEY</button>
+        </div>
+      </form>
       <div class="auth-footer-note">SECURED VIA SHIELDED JWT PROTOCOL // SECURE SECTOR</div>
     </div>
   </div>
@@ -50,8 +72,7 @@
     <header class="app-header">
       <div class="logo-text" data-text="CYBERPUNK // ROOMS">CYBERPUNK // ROOMS</div>
       <div class="user-profile">
-        <span id="current-user-display" class="current-user-tag"
-          onclick="openProfile(AppState.currentUser.toLowerCase())" style="cursor: pointer;"></span>
+        <span id="current-user-display" class="current-user-tag" style="cursor: pointer;"></span>
         <button class="cyber-btn" onclick="handleLogout()" style="padding: 7px 16px; font-size: 10px;">LOGOUT</button>
       </div>
     </header>
@@ -132,7 +153,9 @@
               <circle cx="17.5" cy="10.5" r="0.5" fill="currentColor"></circle>
               <circle cx="8.5" cy="7.5" r="0.5" fill="currentColor"></circle>
               <circle cx="6.5" cy="12.5" r="0.5" fill="currentColor"></circle>
-              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10c.82 0 1.57-.2 2.23-.56.67-.37 1.13-.97 1.13-1.72 0-.66-.33-1.26-.88-1.63-.44-.29-.88-.73-.88-1.47 0-.59.35-1.11.88-1.41.53-.3 1.06-.44 1.47-.44.82 0 1.5-.68 1.5-1.5 0-.82-.68-1.5-1.5-1.5-.41 0-.94.14-1.47.44-.53.3-.88.82-.88 1.41 0 .74.44 1.18.88 1.47.55.37.88.97.88 1.63 0 .75-.46 1.35-1.13 1.72-.66.36-1.41.56-2.23.56z"></path>
+              <path
+                d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10c.82 0 1.57-.2 2.23-.56.67-.37 1.13-.97 1.13-1.72 0-.66-.33-1.26-.88-1.63-.44-.29-.88-.73-.88-1.47 0-.59.35-1.11.88-1.41.53-.3 1.06-.44 1.47-.44.82 0 1.5-.68 1.5-1.5 0-.82-.68-1.5-1.5-1.5-.41 0-.94.14-1.47.44-.53.3-.88.82-.88 1.41 0 .74.44 1.18.88 1.47.55.37.88.97.88 1.63 0 .75-.46 1.35-1.13 1.72-.66.36-1.41.56-2.23.56z">
+              </path>
             </svg>
             WALL
           </button>
@@ -212,7 +235,8 @@
               <div
                 style="height:80px;background:#0a0e1a;border-radius:6px;border:2px solid var(--border-card);position:relative;">
               </div>
-              <div style="font-size:10px;color:var(--text-muted);font-family:var(--font-tech);text-align:center;margin-top:6px;">
+              <div
+                style="font-size:10px;color:var(--text-muted);font-family:var(--font-tech);text-align:center;margin-top:6px;">
                 SOLID</div>
             </div>
             <div class="wallpaper-option" data-preset="grid" onclick="setWallpaper('grid')">

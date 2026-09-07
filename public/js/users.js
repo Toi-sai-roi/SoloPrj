@@ -69,7 +69,6 @@ function updateUserCard(username) {
     dot.style = '';
   }
 
-  // Nếu đang ở tab friends và relation không còn là friend → ẩn card
   if (AppState.currentUsersTab === 'friends' && relation !== 'friend') {
     card.style.display = 'none';
     // Update count
@@ -81,7 +80,6 @@ function updateUserCard(username) {
   }
 }
 
-// Update chỉ status dot của 1 user (dùng cho status_change)
 function updateUserOnlineStatus(username, online) {
   const userIdx = AppState.usersData.findIndex(u => u.username === username);
   if (userIdx !== -1) {
@@ -97,12 +95,10 @@ function updateUserOnlineStatus(username, online) {
   }
 }
 
-// Update unread dot cho tất cả user có thay đổi unread (không rerender cả list)
 function updateUnreadDots(newCounts) {
   const oldCounts = AppState.unreadCounts || {};
   AppState.unreadCounts = newCounts;
 
-  // Chỉ update những user có sự thay đổi
   const allUsernames = new Set([...Object.keys(oldCounts), ...Object.keys(newCounts)]);
   allUsernames.forEach(username => {
     if ((oldCounts[username] || 0) !== (newCounts[username] || 0)) {

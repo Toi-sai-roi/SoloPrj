@@ -1,7 +1,7 @@
 {
   "name": "cyberpunk-chat",
   "version": "2.0.0",
-  "description": "Cyberpunk Chat - Production Ready with Express + PostgreSQL",
+  "description": "Cyberpunk Chat - Express + PostgreSQL",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

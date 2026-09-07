@@ -107,44 +107,98 @@
 
   function initLightning() {
     document.querySelectorAll('.users-panel, .auth-container').forEach(panel => {
-      if (panel.querySelector('.lightning-bolt')) return;
-      const bolt = document.createElement('div');
-      bolt.className = 'lightning-bolt';
-      bolt.style.cssText = `
-        position: absolute; top: -3px; left: 15%;
-        width: 70%; height: 3px;
-        background: linear-gradient(90deg, transparent 0%, #00D4FF 30%, #ffffff 50%, #00D4FF 70%, transparent 100%);
-        opacity: 0; pointer-events: none; z-index: 999; border-radius: 2px;
-        box-shadow: 0 0 8px #00D4FF, 0 0 20px #fff, 0 0 40px #00D4FF;
-      `;
-      panel.appendChild(bolt);
+      if (panel.querySelector('.lightning-svg')) return;
+
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.className = 'lightning-svg';
+      svg.style.cssText = `
+      position: absolute;
+      top: -120px;
+      left: 30%;
+      width: 60px;
+      height: 130px;
+      pointer-events: none;
+      z-index: 999;
+      opacity: 0;
+      overflow: visible;
+    `;
+
+      // Zigzag path — tia sét đánh xuống
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', 'M30,0 L18,45 L28,45 L10,110 L22,110 L0,200');
+      path.setAttribute('stroke', '#00D4FF');
+      path.setAttribute('stroke-width', '2');
+      path.setAttribute('fill', 'none');
+      path.setAttribute('filter', 'url(#glow)');
+
+      // Glow filter
+      const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+      defs.innerHTML = `
+      <filter id="lightning-glow" x="-200%" y="-200%" width="500%" height="500%">
+        <feGaussianBlur stdDeviation="3" result="blur"/>
+        <feMerge>
+          <feMergeNode in="blur"/>
+          <feMergeNode in="blur"/>
+          <feMergeNode in="SourceGraphic"/>
+        </feMerge>
+      </filter>
+    `;
+      path.setAttribute('filter', 'url(#lightning-glow)');
+
+      svg.appendChild(defs);
+      svg.appendChild(path);
+
+      // Thêm white core (tia trắng mỏng bên trong)
+      const core = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      core.setAttribute('d', 'M30,0 L18,45 L28,45 L10,110 L22,110 L0,200');
+      core.setAttribute('stroke', 'white');
+      core.setAttribute('stroke-width', '0.8');
+      core.setAttribute('fill', 'none');
+      core.setAttribute('opacity', '0.9');
+      svg.appendChild(core);
+
+      panel.appendChild(svg);
     });
   }
 
+  // Thay hàm triggerLightning
   function triggerLightning() {
-  if (document.body.classList.contains('light-theme')) return;
+    if (document.body.classList.contains('light-theme')) return;
 
-  const flash = document.createElement('div');
-  flash.style.cssText = `
+    // Random hóa path mỗi lần — tia sét không bao giờ giống nhau
+    const bolts = document.querySelectorAll('.lightning-svg');
+    bolts.forEach(svg => {
+      const paths = svg.querySelectorAll('path');
+      const x = 20 + Math.random() * 20; // random x position
+      const newD = `M${x},0 L${x - 10},${35 + Math.random() * 15} L${x + 8},${35 + Math.random() * 15} L${x - 14},${90 + Math.random() * 15} L${x + 6},${90 + Math.random() * 15} L${x - 5},200`;
+      paths.forEach(p => p.setAttribute('d', newD));
+    });
+
+    // Flash toàn màn hình nhẹ (giữ nguyên cái này)
+    const flash = document.createElement('div');
+    flash.style.cssText = `
     position: fixed; inset: 0;
     pointer-events: none; z-index: 999;
-    background: radial-gradient(ellipse at 50% 0%, 
-      rgba(180, 240, 255, 0.18) 0%, 
-      rgba(0, 212, 255, 0.06) 40%, 
+    background: radial-gradient(ellipse at 50% 0%,
+      rgba(180,240,255,0.15) 0%,
+      rgba(0,212,255,0.05) 40%,
       transparent 70%
     );
     opacity: 0;
   `;
-  document.body.appendChild(flash);
+    document.body.appendChild(flash);
 
-  // Chớp nhanh 2 lần
-  flash.style.opacity = '1';
-  setTimeout(() => { flash.style.opacity = '0.2'; }, 60);
-  setTimeout(() => { flash.style.opacity = '0.8'; }, 100);
-  setTimeout(() => { flash.style.opacity = '0';   }, 160);
-  setTimeout(() => { flash.style.opacity = '0.5'; }, 220);
-  setTimeout(() => { flash.style.opacity = '0';   flash.remove(); }, 320);
-}
+    // Animate tia sét
+    bolts.forEach(svg => {
+      svg.style.opacity = '0';
+      setTimeout(() => { svg.style.opacity = '1'; flash.style.opacity = '1'; }, 0);
+      setTimeout(() => { svg.style.opacity = '0.4'; flash.style.opacity = '0.3'; }, 60);
+      setTimeout(() => { svg.style.opacity = '1'; flash.style.opacity = '0.8'; }, 100);
+      setTimeout(() => { svg.style.opacity = '0.2'; flash.style.opacity = '0.1'; }, 160);
+      setTimeout(() => { svg.style.opacity = '0.9'; flash.style.opacity = '0.6'; }, 200);
+      setTimeout(() => { svg.style.opacity = '0'; flash.style.opacity = '0'; flash.remove(); }, 300);
+    });
+  }
 
   function startLightningLoop() {
     setTimeout(function loop() {
@@ -159,6 +213,7 @@
     if (isDark) {
       startRain();
       setVignette(true);
+      initLightning(); 
       if (!lightningLoopStarted) {
         lightningLoopStarted = true;
         startLightningLoop();
@@ -176,9 +231,6 @@
 
   document.addEventListener('DOMContentLoaded', () => {
     initVignette();
-    initLightning();
-    // const isDark = !document.body.classList.contains('light-theme');
-    // setAmbientDark(isDark);
   });
 
 })();

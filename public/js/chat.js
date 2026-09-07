@@ -77,7 +77,6 @@ function initWebSocket() {
   AppState.ws = new WebSocket(`${protocol}//${window.location.host}`);
 
   AppState.ws.onopen = () => {
-    // FIX #2: Gửi auth message đầu tiên thay vì token qua URL
     AppState.ws.send(JSON.stringify({ type: 'auth', token: AppState.token }));
     console.log('[WS Connected]');
   };
@@ -171,7 +170,6 @@ function initWebSocket() {
           const isToPartner = data.receiver === AppState.activeChatPartner;
 
           if (isFromPartner || isToPartner) {
-            // 🔥 FIX: Just append the new message, DON'T reload entire history
             appendChatMessage(data);
             scrollToBottom();
           } else {
@@ -198,7 +196,6 @@ function initWebSocket() {
             if (actions) actions.remove();
           }
 
-          // 🔥 FIX: Nếu tin nhắn bị xóa đang là pinned thì ẩn pinned bar
           if (currentPinnedMessage && currentPinnedMessage.id == data.messageId) {
             hidePinnedBar();
           }
@@ -207,7 +204,6 @@ function initWebSocket() {
 
         case 'pin_update': {
           const { conversation, pinned_message } = data;
-          // Check if this pin update is for current conversation
           const isCurrentConvo =
             (conversation.user1 === AppState.currentUser && conversation.user2 === AppState.activeChatPartner) ||
             (conversation.user1 === AppState.activeChatPartner && conversation.user2 === AppState.currentUser);

@@ -8,11 +8,22 @@ function switchAuthTab(mode) {
   authMode = mode;
   const authErrorMsg = document.getElementById('auth-error-msg');
   const authSubmitBtn = document.getElementById('auth-submit-btn');
+  const authForm = document.getElementById('auth-form');
+  const forgotForm = document.getElementById('forgot-form');
 
   authErrorMsg.style.display = 'none';
   document.getElementById('tab-login').classList.toggle('active', mode === 'login');
   document.getElementById('tab-register').classList.toggle('active', mode === 'register');
-  authSubmitBtn.textContent = mode === 'login' ? 'INITIATE CONNECT' : 'REGISTER PROTOCOL';
+  document.getElementById('tab-forgot').classList.toggle('active', mode === 'forgot');
+
+  if (mode === 'forgot') {
+    authForm.style.display = 'none';
+    forgotForm.style.display = 'block';
+  } else {
+    authForm.style.display = 'block';
+    forgotForm.style.display = 'none';
+    authSubmitBtn.textContent = mode === 'login' ? 'INITIATE CONNECT' : 'REGISTER PROTOCOL';
+  }
 }
 
 async function handleAuthSubmit(e) {
@@ -39,7 +50,6 @@ async function handleAuthSubmit(e) {
 
     const data = await response.json();
     if (!response.ok) {
-      // Ưu tiên message từ backend, fallback sang error code
       const errorMsg = data.message || data.error || 'Lỗi mạng không xác định';
       throw new Error(errorMsg);
     }
@@ -54,12 +64,20 @@ async function handleAuthSubmit(e) {
     document.getElementById('auth-username').value = '';
     document.getElementById('auth-password').value = '';
 
-    showScreen('home-screen');
-    loadUsers();
-    initWebSocket();
+    // Nếu vừa register, bắt buộc hiện recovery code trước khi vào app
+    if (authMode === 'register' && data.recoveryCode) {
+      showRecoveryCode(data.recoveryCode, () => {
+        showScreen('home-screen');
+        loadUsers();
+        initWebSocket();
+      });
+    } else {
+      showScreen('home-screen');
+      loadUsers();
+      initWebSocket();
+    }
 
   } catch (err) {
-    // Kiểm tra nếu là lỗi từ server với message cụ thể
     let errorMessage = err.message;
 
     if (err.message === 'NODE_NOT_FOUND') {
@@ -78,6 +96,68 @@ async function handleAuthSubmit(e) {
   }
 }
 
+function showRecoveryCode(code, onConfirm) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = `
+    position: fixed; inset: 0; background: rgba(0,0,0,0.9);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 9999; flex-direction: column; padding: 20px; text-align: center;
+  `;
+  overlay.innerHTML = `
+    <h2 style="color:#ff2fd0; margin-bottom:16px;">⚠ LƯU MÃ KHÔI PHỤC NÀY</h2>
+    <p style="color:#aaa; max-width:400px; margin-bottom:20px;">
+      Mã này chỉ hiện <strong>1 lần duy nhất</strong>. Dùng để lấy lại tài khoản nếu quên mật khẩu.
+      Không ai có thể xem lại mã này giúp bạn.
+    </p>
+    <div style="font-size:28px; font-family:monospace; letter-spacing:4px; color:#0ff; background:#111; padding:16px 24px; border:1px solid #0ff; border-radius:8px; margin-bottom:24px;">
+      ${code}
+    </div>
+    <button id="recovery-confirm-btn" style="padding:12px 32px; background:#ff2fd0; border:none; border-radius:6px; color:#000; font-weight:bold; cursor:pointer;">
+      TÔI ĐÃ LƯU MÃ NÀY
+    </button>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById('recovery-confirm-btn').addEventListener('click', () => {
+    document.body.removeChild(overlay);
+    onConfirm();
+  });
+}
+
+async function handleForgotPassword(e) {
+  e.preventDefault();
+
+  const username = document.getElementById('forgot-username').value;
+  const recoveryCode = document.getElementById('forgot-recovery-code').value;
+  const newPassword = document.getElementById('forgot-new-password').value;
+  const errorMsg = document.getElementById('forgot-error-msg');
+
+  errorMsg.style.display = 'none';
+
+  try {
+    const response = await fetch('/api/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, recoveryCode, newPassword })
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.message || data.error || 'Lỗi không xác định');
+    }
+
+    showRecoveryCode(data.recoveryCode, () => {
+      switchAuthTab('login');
+      document.getElementById('forgot-username').value = '';
+      document.getElementById('forgot-recovery-code').value = '';
+      document.getElementById('forgot-new-password').value = '';
+    });
+
+  } catch (err) {
+    errorMsg.textContent = `LỖI PROTOCOL: ${err.message.toUpperCase()}`;
+    errorMsg.style.display = 'block';
+  }
+}
+
 function handleLogout() {
   if (AppState.ws) AppState.ws.close();
   localStorage.removeItem('cyber_token');
@@ -87,3 +167,4 @@ function handleLogout() {
   AppState.activeChatPartner = null;
   showScreen('auth-screen');
 }
+
