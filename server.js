@@ -316,7 +316,7 @@ wss.on('connection', async (wsConn, req) => {
         return;
       }
 
-      username = decoded.username;
+      username = decoded.username.normalize('NFC');
 
       const userCheck = await query('SELECT 1 FROM users WHERE username = $1', [username]);
       if (userCheck.rows.length === 0) {
@@ -366,14 +366,15 @@ wss.on('connection', async (wsConn, req) => {
           await updateLastSeen(username);
 
           if (data.type === 'typing') {
-            const { to, isTyping } = data;
+            const to = data.to?.normalize('NFC');
+            const { isTyping } = data;
             if (!to) return;
             broadcastToUser(to, { type: 'typing', sender: username, isTyping });
             return;
           }
 
           if (data.type === 'get_history') {
-            const { with: withUser } = data;
+            const withUser = data.with?.normalize('NFC');
             if (!withUser) return;
 
             await markMessagesRead(withUser, username);
@@ -409,7 +410,8 @@ wss.on('connection', async (wsConn, req) => {
           }
 
           if (data.type === 'send_message') {
-            const { to, text, media_url, reply_to } = data;
+            const to = data.to?.normalize('NFC');
+            const { text, media_url, reply_to } = data;
             if (!to || (!text?.trim() && !media_url)) return;
 
             const cleanText = text?.trim() || '';
@@ -688,7 +690,7 @@ wss.on('connection', async (wsConn, req) => {
           }
 
           if (data.type === 'unpin_message') {
-            const { withUser } = data;
+            const withUser = data.withUser?.normalize('NFC');
             if (!withUser) return;
 
             const u1 = username < withUser ? username : withUser;
@@ -707,7 +709,7 @@ wss.on('connection', async (wsConn, req) => {
           }
 
           if (data.type === 'get_pinned') {
-            const { with: withUser } = data;
+            const withUser = data.with?.normalize('NFC');
             if (!withUser) return;
 
             const u1 = username < withUser ? username : withUser;
@@ -733,7 +735,8 @@ wss.on('connection', async (wsConn, req) => {
           }
 
           if (data.type === 'search_messages') {
-            const { with: withUser, q: keyword } = data;
+            const withUser = data.with?.normalize('NFC');
+            const { q: keyword } = data;
             if (!withUser || !keyword?.trim()) {
               wsConn.send(JSON.stringify({ type: 'search_results', results: [] }));
               return;
