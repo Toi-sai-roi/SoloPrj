@@ -12,7 +12,7 @@ const AppState = {
   activeGroup: null,
   activeGroupData: null,
   ws: null,
-  unreadCounts: {}  
+  unreadCounts: {}  // 🔥 NEW: Initialize unread counts
 };
 
 // === AUTO LOGOUT KHI AUTH FAIL ===
@@ -48,9 +48,9 @@ function initTheme() {
     document.body.classList.add('light-theme');
     const btn = document.getElementById('theme-toggle-btn');
     if (btn) btn.textContent = '☀️';
-    setAmbientDark(false);
+    setAmbientDark(false); 
   } else {
-    setAmbientDark(true);
+    setAmbientDark(true);  
   }
 }
 
@@ -62,13 +62,13 @@ function toggleTheme() {
     localStorage.setItem('cyber_theme', 'dark');
     if (btn) btn.textContent = '🌙';
     if (profileBtn) profileBtn.textContent = '☀️ LIGHT MODE';
-    setAmbientDark(true);
+    setAmbientDark(true);   
   } else {
     document.body.classList.add('light-theme');
     localStorage.setItem('cyber_theme', 'light');
     if (btn) btn.textContent = '☀️';
     if (profileBtn) profileBtn.textContent = '🌙 DARK MODE';
-    setAmbientDark(false);
+    setAmbientDark(false);  
   }
   if (typeof closeProfileModal === 'function') closeProfileModal();
 }
@@ -79,11 +79,13 @@ window.addEventListener('DOMContentLoaded', () => {
   if (AppState.token && AppState.currentUser) {
     const userDisplay = document.getElementById('current-user-display');
 
+    // Gán text hiển thị
     userDisplay.textContent = `USER // ${AppState.currentUser.toUpperCase()}`;
 
+    // THÊM DÒNG NÀY: Biến nút thành pointer và bắt sự kiện click mở profile
     userDisplay.style.cursor = 'pointer';
-    userDisplay.addEventListener('click', (e) => {
-      e.stopPropagation();
+    userDisplay.addEventListener('click', () => {
+      // Ép hẳn về toLowerCase() trước khi truyền vào để bảo đảm an toàn tuyệt đối
       const safeUsername = AppState.currentUser.toLowerCase();
       openProfile(safeUsername);
     });

@@ -132,6 +132,7 @@ async function handleUnblockAction(targetUser) {
   } catch (e) { console.error(e); }
 }
 
+// Hàm xử lý tương tác Kết bạn / Hủy bạn
 async function handleFriendAction(targetUser, actionType) {
   try {
     let url, method, body;
@@ -176,6 +177,9 @@ function closeProfileModal() {
   if (modal) modal.style.display = 'none';
 }
 
+// ==========================================
+// HÀM TẠO LỚP NỀN ĐEN NỘI BỘ (LỚP 3) - ĐÈ KHÍT LÊN TRÊN MODAL PROFILE
+// ==========================================
 function openInternalLightbox(event, src) {
   if (event) {
     event.stopPropagation();

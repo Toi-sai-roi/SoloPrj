@@ -61,16 +61,6 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// Rate limiting for login/register
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,  
-  max: 5,                     
-  message: { error: 'Too many requests, please try again later' },
-  skipSuccessfulRequests: true 
-});
-app.use('/api/login', authLimiter);
-app.use('/api/register', authLimiter);
-
 // Static files
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));

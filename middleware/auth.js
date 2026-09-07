@@ -42,4 +42,4 @@ function generateToken(username) {
   return jwt.sign({ username }, JWT_SECRET, { expiresIn: '7d' });
 }
 
-module.exports = { authenticateToken, generateToken };
+module.exports = { authenticateToken, generateToken, JWT_SECRET };

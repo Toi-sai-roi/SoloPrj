@@ -22,7 +22,7 @@ async function openGroupChat(groupId) {
       headers: { 'Authorization': `Bearer ${AppState.token}` }
     });
     if (!res.ok) {
-      if (res.status === 401 || res.status === 403) return; 
+      if (res.status === 401 || res.status === 403) return; // handleAuthError đã xử lý
       throw new Error('Cannot load group');
     }
     const group = await res.json();
@@ -231,6 +231,7 @@ function openCreateGroupModal() {
   const modal = document.getElementById('create-group-modal');
   if (!modal) return;
 
+  // Điền danh sách friends vào
   const membersContainer = document.getElementById('group-members-select');
   membersContainer.innerHTML = '';
 
@@ -290,7 +291,7 @@ async function submitCreateGroup() {
     });
 
     if (!res.ok) {
-      if (res.status === 401 || res.status === 403) return; 
+      if (res.status === 401 || res.status === 403) return; // handleAuthError đã xử lý
       const result = await res.json();
       errorEl.textContent = result.error || 'LỖI TẠO NHÓM';
       errorEl.style.display = 'block';
@@ -324,7 +325,7 @@ async function openGroupSettings(groupId) {
       headers: { 'Authorization': `Bearer ${AppState.token}` }
     });
     if (!res.ok) {
-      if (res.status === 401 || res.status === 403) return; 
+      if (res.status === 401 || res.status === 403) return; // handleAuthError đã xử lý
       throw new Error('Failed');
     }
     const group = await res.json();
@@ -409,7 +410,7 @@ async function kickGroupMember(groupId, username) {
       headers: { 'Authorization': `Bearer ${AppState.token}` }
     });
     if (!res.ok) {
-      if (res.status === 401 || res.status === 403) return; 
+      if (res.status === 401 || res.status === 403) return; // handleAuthError đã xử lý
       alert('Kick thất bại');
       return;
     }
@@ -430,7 +431,7 @@ async function inviteToGroup(groupId) {
       body: JSON.stringify({ username })
     });
     if (!res.ok) {
-      if (res.status === 401 || res.status === 403) return;
+      if (res.status === 401 || res.status === 403) return; // handleAuthError đã xử lý
       const d = await res.json();
       alert(d.error || 'Thất bại');
       return;
@@ -447,7 +448,7 @@ async function leaveGroup(groupId) {
       headers: { 'Authorization': `Bearer ${AppState.token}` }
     });
     if (!res.ok) {
-      if (res.status === 401 || res.status === 403) return; 
+      if (res.status === 401 || res.status === 403) return; // handleAuthError đã xử lý
       const d = await res.json();
       alert(d.error || 'Thất bại');
       return;
@@ -465,7 +466,7 @@ async function deleteGroup(groupId) {
       headers: { 'Authorization': `Bearer ${AppState.token}` }
     });
     if (!res.ok) {
-      if (res.status === 401 || res.status === 403) return; 
+      if (res.status === 401 || res.status === 403) return; // handleAuthError đã xử lý
       const d = await res.json();
       alert(d.error || 'Thất bại');
       return;
